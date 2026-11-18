@@ -36,7 +36,7 @@ public enum MacTalkError: Error, Equatable, Sendable, LocalizedError {
         case .invalidCode: "That code didn't work. Check the latest email and try again."
         case .rateLimited: "You're doing that a bit too often. Wait a minute and try again."
         case .notFriends: "You can only call people who accepted your invitation."
-        case .permissionDenied: "MacTalk's server didn't allow that. Check that you're still friends and try again."
+        case .permissionDenied: "MacTalk's database refused this. If MacTalk was just set up, its database rules may not be published yet."
         case .signInCancelled: "Sign-in was cancelled."
         case .friendOffline(let n): "\(n) is offline right now."
         case .friendBusy(let n): "\(n) is busy right now."

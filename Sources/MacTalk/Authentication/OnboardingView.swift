@@ -59,7 +59,7 @@ private struct Feature: View {
             Image(systemName: icon).font(.title3).foregroundStyle(Color.accentColor).frame(width: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.headline)
-                Text(text).foregroundStyle(.secondary).font(.callout)
+                Text(text).foregroundStyle(.secondary).font(.callout).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -121,6 +121,7 @@ struct ProfileStep: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Create your profile").font(.title.weight(.bold))
             Text("This is how friends will see you.").foregroundStyle(.secondary)
+            if let notice = model.auth?.notice { Banner(kind: .error, text: notice) }
             HStack(spacing: 16) {
                 AvatarPreview(choice: avatar, name: name.isEmpty ? profile.email : name, size: 72)
                 VStack(alignment: .leading, spacing: 6) {

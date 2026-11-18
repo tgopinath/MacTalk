@@ -65,6 +65,11 @@ final class AuthService {
             state = profile.profileCompleted ? .signedIn(profile) : .needsProfile(profile)
         } catch let error as MacTalkError where error == .sessionExpired || error == .notAuthenticated {
             state = .signedOut
+        } catch MacTalkError.permissionDenied {
+            // Signed in, but the database won't let us read our own profile: setup problem.
+            notice = MacTalkError.permissionDenied.errorDescription
+            state = .needsProfile(UserProfile(id: session.uid, email: session.email, displayName: session.displayName,
+                                              avatarURL: session.photoURL))
         } catch {
             // Offline at launch: keep the cached identity and let presence recover later.
             notice = Backend.map(error).errorDescription

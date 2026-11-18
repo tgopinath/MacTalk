@@ -1,17 +1,28 @@
 import SwiftUI
 
-/// The MacTalk mark: the walkie-talkie glyph on its own, filling the given size.
+/// The MacTalk mark: a walkie-talkie with a blue body and an orange screen, drawn on a 24-pt grid.
 struct AppMark: View {
     var size: CGFloat = 22
+    @Environment(\.colorScheme) private var scheme
+
+    private var body_: Color { scheme == .dark ? Color(red: 80/255, green: 145/255, blue: 1) : Color(red: 56/255, green: 122/255, blue: 253/255) }
+    private var screen: Color { scheme == .dark ? Color(red: 1, green: 155/255, blue: 55/255) : Color(red: 245/255, green: 135/255, blue: 30/255) }
+
     var body: some View {
-        Image(systemName: "flipphone")
-            .resizable()
-            .scaledToFit()
-            .fontWeight(.semibold)
-            .foregroundStyle(LinearGradient(colors: [Color(red: 0.24, green: 0.56, blue: 1), Color(red: 0.14, green: 0.36, blue: 0.95)],
-                                            startPoint: .top, endPoint: .bottom))
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        Canvas { ctx, canvasSize in
+            let k = canvasSize.width / 24
+            func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x * k, y: y * k, width: w * k, height: h * k) }
+            func line(_ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat) -> Path {
+                var p = Path(); p.move(to: CGPoint(x: x1 * k, y: y1 * k)); p.addLine(to: CGPoint(x: x2 * k, y: y2 * k)); return p
+            }
+            let stroke = StrokeStyle(lineWidth: 2 * k, lineCap: .round)
+            ctx.stroke(Path(roundedRect: r(6, 6, 12, 16), cornerRadius: 4 * k), with: .color(body_), style: stroke)
+            ctx.stroke(line(7, 6, 7, 1.5), with: .color(body_), style: stroke)
+            ctx.fill(Path(roundedRect: r(8.5, 9, 7, 5.5), cornerRadius: 1.2 * k), with: .color(screen))
+            ctx.stroke(line(10.5, 18, 13.5, 18), with: .color(screen), style: StrokeStyle(lineWidth: 1.6 * k, lineCap: .round))
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 

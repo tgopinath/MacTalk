@@ -91,6 +91,7 @@ final class RealtimeDatabase {
             let task = Task { @MainActor [weak self] in
                 var backoff = Backoff(base: 1, cap: 30)
                 var tree: Any? = nil
+                var refreshedAfterDenial = false
                 while !Task.isCancelled {
                     guard let self else { break }
                     do {
@@ -99,8 +100,15 @@ final class RealtimeDatabase {
                         request.timeoutInterval = 90 // the server sends keep-alives every 30 s
                         let (bytes, response) = try await URLSession.shared.bytes(for: request)
                         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                        if status == 401 { _ = try await self.auth.idToken(forceRefresh: true); continue }
+                        if status == 401 {
+                            // One token refresh; a second 401 means the rules deny access, so back off.
+                            if refreshedAfterDenial { throw MacTalkError.permissionDenied }
+                            refreshedAfterDenial = true
+                            _ = try await self.auth.idToken(forceRefresh: true)
+                            continue
+                        }
                         guard status == 200 else { throw MacTalkError.fromServer(message: "HTTP \(status)") }
+                        refreshedAfterDenial = false
                         backoff.reset()
                         var event = ""
                         for try await line in bytes.lines {
