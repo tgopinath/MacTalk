@@ -240,7 +240,7 @@ private struct PrivacySettings: View {
                         AvatarPreview(choice: avatar, name: profile.name, size: 52)
                         TextField("Display name", text: $editingName)
                     }
-                    AvatarPicker(choice: $avatar)
+                    AvatarPicker(choice: $avatar, googlePhoto: model.auth?.googlePhotoURL)
                     HStack {
                         if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                         Spacer()
@@ -261,7 +261,7 @@ private struct PrivacySettings: View {
                 }
                 Section("Account security") {
                     LabeledContent("Email", value: profile.email)
-                    LabeledContent("Sign-in", value: "One-time email code · session stored in Keychain")
+                    LabeledContent("Sign-in", value: "Google · session stored in Keychain")
                     Button("Sign Out") { Task { await model.signOut() } }
                 }
             }

@@ -85,7 +85,7 @@ final class SettingsStore {
         static let preview = "notificationPreview", appearance = "appearance"
         static let inputDevice = "inputDeviceUID", outputDevice = "outputDeviceUID", outputVolume = "outputVolume"
         static let speedDialEnabled = "speedDialEnabled", speedDialModifier = "speedDialModifier"
-        static func speedDialOrder(_ user: UUID) -> String { "speedDialOrder.\(user.uuidString)" }
+        static func speedDialOrder(_ user: UserID) -> String { "speedDialOrder.\(user)" }
     }
 
     var showMenuBarIcon: Bool { didSet { defaults.set(showMenuBarIcon, forKey: K.showMenuBarIcon) } }
@@ -131,12 +131,11 @@ final class SettingsStore {
         }
     }
 
-    func speedDial(for user: UUID) -> SpeedDial {
-        let ids = (defaults.stringArray(forKey: K.speedDialOrder(user)) ?? []).compactMap(UUID.init(uuidString:))
-        return SpeedDial(order: ids)
+    func speedDial(for user: UserID) -> SpeedDial {
+        SpeedDial(order: defaults.stringArray(forKey: K.speedDialOrder(user)) ?? [])
     }
 
-    func save(_ speedDial: SpeedDial, for user: UUID) {
-        defaults.set(speedDial.order.map(\.uuidString), forKey: K.speedDialOrder(user))
+    func save(_ speedDial: SpeedDial, for user: UserID) {
+        defaults.set(speedDial.order, forKey: K.speedDialOrder(user))
     }
 }

@@ -36,7 +36,9 @@ ditto "$WEBRTC" "$APP/Contents/Frameworks/WebRTC.framework"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/MacTalk" 2>/dev/null || true
 
 sed -e "s|__BUNDLE_ID__|$BUNDLE_ID|" -e "s|__VERSION__|$VERSION|" -e "s|__BUILD__|$BUILD|" \
-    -e "s|__ENV__|$ENVIRONMENT|" -e "s|__SUPABASE_URL__|${SUPABASE_URL}|" -e "s|__SUPABASE_ANON_KEY__|${SUPABASE_ANON_KEY}|" \
+    -e "s|__ENV__|$ENVIRONMENT|" -e "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|" \
+    -e "s|__FIREBASE_DATABASE_URL__|${FIREBASE_DATABASE_URL}|" -e "s|__AUTH_PAGE_URL__|${AUTH_PAGE_URL}|" \
+    -e "s|__TURN_URLS__|${TURN_URLS:-}|" -e "s|__TURN_USERNAME__|${TURN_USERNAME:-}|" -e "s|__TURN_CREDENTIAL__|${TURN_CREDENTIAL:-}|" \
     Resources/Info.plist > "$APP/Contents/Info.plist"
 
 ICONSET="$(mktemp -d)/AppIcon.iconset"

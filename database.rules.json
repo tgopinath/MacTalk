@@ -1,0 +1,132 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "mactalk": {
+      "users": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || root.child('mactalk/u/' + $uid + '/friends/' + auth.uid).exists())",
+          ".write": "auth != null && auth.uid === $uid && auth.token.email_verified === true",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" },
+          "photo": { ".validate": "newData.isString() && newData.val().length <= 512" },
+          "email": { ".validate": "newData.val() === auth.token.email.toLowerCase()" },
+          "status": { ".validate": "newData.val() === 'online' || newData.val() === 'busy' || newData.val() === 'dnd'" },
+          "online": { ".validate": "newData.isBoolean()" },
+          "lastSeen": { ".validate": "newData.val() === now" },
+          "lastCallAt": { ".validate": "newData.val() === now" },
+          "inCall": {
+            ".validate": "newData.hasChildren(['callId', 'at'])",
+            "callId": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "at": { ".validate": "newData.val() === now" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
+        }
+      },
+
+      "u": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+
+          "friends": {
+            "$friendUid": {
+              ".write": "auth != null && ((auth.uid === $uid && (!newData.exists() || root.child('mactalk/inbox/' + auth.token.email.toLowerCase().replace('.', ',') + '/' + $friendUid).exists() || root.child('mactalk/u/' + $friendUid + '/friends/' + $uid).exists())) || (auth.uid === $friendUid && (!newData.exists() || root.child('mactalk/inbox/' + auth.token.email.toLowerCase().replace('.', ',') + '/' + $uid).exists())))",
+              ".validate": "newData.hasChildren(['since']) && $friendUid !== $uid",
+              "since": { ".validate": "newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          },
+
+          "outbox": {
+            "$emailKey": {
+              ".write": "auth != null && (auth.uid === $uid || $emailKey === auth.token.email.toLowerCase().replace('.', ','))",
+              ".validate": "newData.hasChildren(['toEmail', 'status'])",
+              "toEmail": { ".validate": "newData.isString() && newData.val().toLowerCase().replace('.', ',') === $emailKey" },
+              "status": { ".validate": "(auth.uid === $uid && newData.val() === 'pending') || ($emailKey === auth.token.email.toLowerCase().replace('.', ',') && (newData.val() === 'accepted' || newData.val() === 'declined')) || newData.val() === data.val()" },
+              "createdAt": { ".validate": "newData.val() === now || newData.val() === data.val()" },
+              "updatedAt": { ".validate": "newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          },
+
+          "blocks": {
+            "$blockedUid": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "$blockedUid !== $uid",
+              "email": { ".validate": "newData.isString() && newData.val().length <= 254" },
+              "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
+              "photo": { ".validate": "newData.isString() && newData.val().length <= 512" },
+              "at": { ".validate": "newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          },
+
+          "rings": {
+            "$callId": {
+              ".write": "auth != null && (auth.uid === $uid || (data.exists() && data.child('caller').val() === auth.uid) || (!data.exists() && newData.child('caller').val() === auth.uid && newData.parent().parent().parent().parent().child('calls/' + $callId + '/caller').val() === auth.uid && newData.parent().parent().parent().parent().child('calls/' + $callId + '/callee').val() === $uid))",
+              ".validate": "newData.hasChildren(['caller', 'expiresAt'])",
+              "caller": { ".validate": "newData.isString()" },
+              "callerName": { ".validate": "newData.isString() && newData.val().length <= 40" },
+              "callerPhoto": { ".validate": "newData.isString() && newData.val().length <= 512" },
+              "expiresAt": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        }
+      },
+
+      "inbox": {
+        "$emailKey": {
+          ".read": "auth != null && $emailKey === auth.token.email.toLowerCase().replace('.', ',')",
+          "$fromUid": {
+            ".write": "auth != null && auth.token.email_verified === true && (auth.uid === $fromUid || $emailKey === auth.token.email.toLowerCase().replace('.', ','))",
+            ".validate": "newData.hasChildren(['fromEmail', 'status']) && (auth.uid !== $fromUid || $emailKey !== auth.token.email.toLowerCase().replace('.', ','))",
+            "fromEmail": { ".validate": "(auth.uid === $fromUid && newData.val() === auth.token.email.toLowerCase()) || newData.val() === data.val()" },
+            "fromName": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "fromPhoto": { ".validate": "newData.isString() && newData.val().length <= 512" },
+            "status": { ".validate": "newData.val() === 'pending' || (newData.val() === 'declined' && $emailKey === auth.token.email.toLowerCase().replace('.', ','))" },
+            "createdAt": { ".validate": "newData.val() === now || newData.val() === data.val()" },
+            "updatedAt": { ".validate": "newData.val() === now" },
+            "$other": { ".validate": false }
+          }
+        }
+      },
+
+      "calls": {
+        "$callId": {
+          ".read": "auth != null && (data.child('caller').val() === auth.uid || data.child('callee').val() === auth.uid)",
+          ".write": "auth != null && ((!data.exists() && newData.child('caller').val() === auth.uid) || (data.exists() && (data.child('caller').val() === auth.uid || data.child('callee').val() === auth.uid)))",
+          ".validate": "newData.hasChildren(['caller', 'callee', 'status', 'expiresAt']) && (data.exists() || (newData.child('status').val() === 'ringing' && newData.child('callee').val() !== auth.uid && newData.child('expiresAt').val() <= now + 120000 && root.child('mactalk/u/' + auth.uid + '/friends/' + newData.child('callee').val()).exists() && root.child('mactalk/u/' + newData.child('callee').val() + '/friends/' + auth.uid).exists() && !root.child('mactalk/u/' + newData.child('callee').val() + '/blocks/' + auth.uid).exists() && !root.child('mactalk/u/' + auth.uid + '/blocks/' + newData.child('callee').val()).exists() && root.child('mactalk/users/' + newData.child('callee').val() + '/online').val() === true && root.child('mactalk/users/' + newData.child('callee').val() + '/lastSeen').val() > now - 60000 && root.child('mactalk/users/' + newData.child('callee').val() + '/status').val() === 'online' && (!root.child('mactalk/users/' + newData.child('callee').val() + '/inCall').exists() || root.child('mactalk/users/' + newData.child('callee').val() + '/inCall/at').val() < now - 90000) && newData.parent().parent().child('users/' + auth.uid + '/lastCallAt').val() === now && (!root.child('mactalk/users/' + auth.uid + '/lastCallAt').exists() || root.child('mactalk/users/' + auth.uid + '/lastCallAt').val() < now - 3000)))",
+          "caller": { ".validate": "!data.exists() || newData.val() === data.val()" },
+          "callee": { ".validate": "!data.exists() || newData.val() === data.val()" },
+          "callerName": { ".validate": "newData.isString() && newData.val().length <= 40 && (!data.exists() || newData.val() === data.val())" },
+          "callerPhoto": { ".validate": "newData.isString() && newData.val().length <= 512 && (!data.exists() || newData.val() === data.val())" },
+          "createdAt": { ".validate": "(!data.exists() && newData.val() === now) || newData.val() === data.val()" },
+          "expiresAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+          "acceptedAt": { ".validate": "newData.val() === now" },
+          "connectedAt": { ".validate": "newData.val() === now" },
+          "endedAt": { ".validate": "newData.val() === now" },
+          "status": {
+            ".validate": "newData.val() === data.val() || (!data.exists() && newData.val() === 'ringing') || (data.val() === 'ringing' && auth.uid === newData.parent().child('callee').val() && ((newData.val() === 'accepted' && now < newData.parent().child('expiresAt').val()) || newData.val() === 'declined' || newData.val() === 'busy')) || (data.val() === 'ringing' && auth.uid === newData.parent().child('caller').val() && (newData.val() === 'cancelled' || newData.val() === 'missed')) || ((data.val() === 'accepted' || data.val() === 'connecting' || data.val() === 'connected') && (newData.val() === 'connecting' || newData.val() === 'connected' || newData.val() === 'ended' || newData.val() === 'failed'))"
+          },
+          "signals": {
+            "$signalId": {
+              ".validate": "!data.exists() && newData.child('from').val() === auth.uid && (root.child('mactalk/calls/' + $callId + '/status').val() === 'accepted' || root.child('mactalk/calls/' + $callId + '/status').val() === 'connecting' || root.child('mactalk/calls/' + $callId + '/status').val() === 'connected') && newData.hasChildren(['from', 'kind', 'payload'])",
+              "from": { ".validate": "newData.isString()" },
+              "kind": { ".validate": "newData.val() === 'offer' || newData.val() === 'answer' || newData.val() === 'ice' || newData.val() === 'restart' || newData.val() === 'bye'" },
+              "payload": {
+                "sdp": { ".validate": "newData.isString() && newData.val().length <= 16000" },
+                "candidate": { ".validate": "newData.isString() && newData.val().length <= 1000" },
+                "sdpMid": { ".validate": "newData.isString() && newData.val().length <= 64" },
+                "sdpMLineIndex": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}

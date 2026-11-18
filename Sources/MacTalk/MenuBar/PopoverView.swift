@@ -23,7 +23,7 @@ private struct SignedOutPopover: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         VStack(spacing: 14) {
-            AppMark(size: 48).padding(.top, 22)
+            AppMark(size: 60).padding(.top, 22)
             VStack(spacing: 4) {
                 Text("MacTalk").font(.title3.weight(.semibold))
                 Text("Talk to your friends with one click.").foregroundStyle(.secondary)
@@ -61,7 +61,7 @@ private struct SignedInPopover: View {
                 if let error = model.friends?.loadError, model.network.isOnline {
                     Banner(kind: .error, text: error == .network ? "Can't reach the MacTalk server right now." : (error.errorDescription ?? "Couldn't load friends."),
                            actionTitle: "Retry") {
-                        Task { await model.friends?.refreshAll() }
+                        Task { await model.friends?.refreshPresence() }
                     }
                 }
                 if let call = model.calls?.session, !call.phase.isTerminal {
@@ -81,7 +81,7 @@ private struct SignedInPopover: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            AppMark()
+            AppMark(size: 28)
             Text("MacTalk").font(.headline)
             Spacer()
             Menu {
@@ -340,9 +340,9 @@ private struct EmptyFriendsView: View {
 struct ConfigurationNeededView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { AppMark(size: 28); Text("MacTalk").font(.headline) }
+            HStack { AppMark(size: 34); Text("MacTalk").font(.headline) }
             Banner(kind: .error, text: MacTalkError.notConfigured.errorDescription ?? "")
-            Text("1. Create a Supabase project and run the migration in supabase/migrations.\n2. Put the project URL and anon key in Config/development.env.\n3. Rebuild with scripts/build-app.sh.")
+            Text("1. Create the Realtime Database and deploy database.rules.json.\n2. Put the Firebase settings in Config/development.env.\n3. Rebuild with scripts/build-app.sh.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("See README.md for the full setup.").font(.caption).foregroundStyle(.tertiary)
             HStack { Spacer(); Button("Quit MacTalk") { NSApp.terminate(nil) } }

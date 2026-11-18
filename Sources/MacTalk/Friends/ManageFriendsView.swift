@@ -10,7 +10,7 @@ struct ManageFriendsView: View {
     @State private var confirm: ConfirmAction?
 
     enum ConfirmAction: Identifiable {
-        case remove(Friend), block(UUID, String)
+        case remove(Friend), block(UserID, String)
         var id: String {
             switch self {
             case .remove(let f): "remove-\(f.id)"
@@ -38,7 +38,7 @@ struct ManageFriendsView: View {
             }
         }
         .frame(minWidth: 460, minHeight: 420)
-        .task { await model.friends?.refreshAll() }
+        .task { await model.friends?.refreshPresence() }
         .alert(item: $confirm) { action in
             switch action {
             case .remove(let friend):
@@ -129,7 +129,7 @@ struct ManageFriendsView: View {
                         Section("Received") {
                             ForEach(incoming) { request in
                                 RequestRow(request: request) {
-                                    Button("Block") { confirm = .block(request.otherID, request.otherName) }
+                                    Button("Block") { if let id = request.otherID { confirm = .block(id, request.otherName) } }
                                     Button("Decline") { run { try await model.friends?.respond(request, accept: false) } }
                                     Button("Accept") { run { try await model.friends?.respond(request, accept: true) } }
                                         .buttonStyle(.borderedProminent)
@@ -144,7 +144,7 @@ struct ManageFriendsView: View {
                                     if request.status == .pending {
                                         Button("Cancel") { run { try await model.friends?.cancel(request) } }
                                         Button("Resend") {
-                                            run { message = try await model.friends?.resend(request) }
+                                            run { message = try await model.friends?.resend(request, fromName: model.auth?.profile?.name ?? "") }
                                         }
                                     }
                                 }

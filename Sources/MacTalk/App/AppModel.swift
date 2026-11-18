@@ -25,7 +25,7 @@ final class AppModel {
     private(set) var hotkeyConflicts: [Int] = []
     private var ringAnimation: Task<Void, Never>?
     private var started = false
-    private var knownIncomingRequestIDs: Set<UUID> = []
+    private var knownIncomingRequestIDs: Set<String>?
 
     init(bundle: Bundle = .main, configuration override: AppConfiguration? = nil) {
         configuration = override ?? AppConfiguration(infoDictionary: bundle.infoDictionary ?? [:])
@@ -37,7 +37,7 @@ final class AppModel {
             self.friends = friends
             auth = AuthService(backend: backend)
             presence = PresenceService(backend: backend, hub: hub)
-            calls = CallManager(backend: backend, hub: hub, settings: settings, notifications: notifications, friends: friends)
+            calls = CallManager(backend: backend, settings: settings, notifications: notifications, friends: friends)
         } else {
             hub = nil; friends = nil; auth = nil; presence = nil; calls = nil
         }
@@ -61,26 +61,16 @@ final class AppModel {
 
         auth.onStateChange = { [weak self] state in self?.authChanged(state) }
 
-        hub.onCall = { [weak calls] record in calls?.handleServer(record) }
-        hub.onFriendships = { [weak friends] in friends?.scheduleRefresh() }
-        hub.onFriendRequests = { [weak self] in
-            guard let self else { return }
-            Task {
-                await self.friends?.refreshAll()
-                self.announceNewRequests()
-            }
+        hub.onUserNode = { [weak friends] node in friends?.apply(userNode: node) }
+        hub.onInbox = { [weak self] node in
+            self?.friends?.apply(inboxNode: node)
+            self?.announceNewRequests()
         }
-        hub.onUserRow = { [weak self] row in
-            guard let self else { return }
-            if row.id == self.auth?.userID { return }
-            self.friends?.applyPresence(userID: row.id, status: row.presence_status, lastSeen: row.last_seen,
-                                        displayName: row.display_name, avatarURL: row.avatar_url)
-        }
-        hub.onResubscribed = { [weak self] in
-            self?.friends?.scheduleRefresh()
-            self?.presence?.beatNow()
-        }
-        presence.onRingingCall = { [weak calls] record in calls?.handleServer(record) }
+        hub.onRings = { [weak calls] rings in calls?.handleRings(rings) }
+        presence.onRings = { [weak calls] rings in calls?.handleRings(rings) }
+        presence.onBeat = { [weak friends] in await friends?.refreshPresence() }
+        presence.activeCallID = { [weak calls] in calls?.activeCallID }
+        calls.myIdentity = { [weak auth] in (auth?.profile?.name ?? "", auth?.profile?.avatarURL) }
 
         calls.onChange = { [weak self] in self?.callChanged() }
 
@@ -100,7 +90,7 @@ final class AppModel {
         case .signedIn(let profile):
             windows.close(.onboarding)
             Task { await startSession(for: profile) }
-        case .signedOut, .awaitingCode, .needsProfile:
+        case .signedOut, .needsProfile:
             if case .signedOut = state { Task { await stopSession() } }
             windows.showOnboarding(model: self)
         case .loading:
@@ -108,19 +98,18 @@ final class AppModel {
         }
     }
 
-    private var sessionUser: UUID?
+    private var sessionUser: UserID?
 
     private func startSession(for profile: UserProfile) async {
         guard sessionUser != profile.id, let hub, let presence, let friends else { return }
         sessionUser = profile.id
         speedDial = settings.speedDial(for: profile.id)
-        await friends.refreshAll()
-        knownIncomingRequestIDs = Set(friends.incomingRequests.map(\.id))
+        friends.setLoading()
         if !settings.autoGoOnline, profile.manualStatus == .online {
             try? await presence.setStatus(.dnd)
             auth?.setLocalStatus(.dnd)
         }
-        await hub.start(userID: profile.id)
+        hub.start(userID: profile.id)
         presence.start()
         applyHotkeys()
         if notifications.authorization == .notDetermined { await notifications.requestAuthorization() }
@@ -130,7 +119,7 @@ final class AppModel {
         guard sessionUser != nil else { return }
         sessionUser = nil
         presence?.stop()
-        await hub?.stop()
+        hub?.stop()
         friends?.reset()
         hotkeys.unregister()
     }
@@ -226,8 +215,11 @@ final class AppModel {
 
     private func announceNewRequests() {
         guard let friends else { return }
-        for request in friends.incomingRequests where !knownIncomingRequestIDs.contains(request.id) {
-            if settings.notificationsEnabled { notifications.showFriendRequest(request) }
+        // The first snapshot after launch is not "new".
+        if let known = knownIncomingRequestIDs {
+            for request in friends.incomingRequests where !known.contains(request.id) {
+                if settings.notificationsEnabled { notifications.showFriendRequest(request) }
+            }
         }
         knownIncomingRequestIDs = Set(friends.incomingRequests.map(\.id))
     }

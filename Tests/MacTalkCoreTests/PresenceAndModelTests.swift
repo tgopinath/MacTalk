@@ -16,13 +16,13 @@ final class PresenceAndModelTests: XCTestCase {
     }
 
     func testFriendEffectivePresence() {
-        let f = Friend(id: UUID(), email: "a@b.co", presenceStatus: .online, lastSeen: Date().addingTimeInterval(-120))
+        let f = Friend(id: "u1", email: "a@b.co", presenceStatus: .online, lastSeen: Date().addingTimeInterval(-120))
         XCTAssertEqual(f.effectivePresence(), .offline)
         XCTAssertEqual(f.name, "a@b.co", "falls back to email when there is no display name")
     }
 
     func testFriendRequestStates() {
-        let base = FriendRequest(id: UUID(), direction: .outgoing, status: .pending, otherID: UUID(), otherEmail: "x@y.z")
+        let base = FriendRequest(direction: .outgoing, status: .pending, otherID: nil, otherEmail: "x@y.z")
         XCTAssertEqual(base.displayState, "Invitation sent")
         var incoming = base; incoming.direction = .incoming
         XCTAssertEqual(incoming.displayState, "Invitation received")
@@ -30,19 +30,35 @@ final class PresenceAndModelTests: XCTestCase {
         XCTAssertEqual(declined.displayState, "Declined")
     }
 
-    func testDecodesServerRows() throws {
-        let json = """
-        {"id":"6f1d2c1e-0b7a-4b8e-9d55-1f2a3b4c5d6e","caller_id":"0a0a0a0a-0000-4000-8000-000000000001",
-         "receiver_id":"0a0a0a0a-0000-4000-8000-000000000002","status":"ringing","end_reason":null,
-         "created_at":"2026-11-18T10:00:00Z","expires_at":"2026-11-18T10:00:45Z","started_at":null,
-         "accepted_at":null,"ended_at":null,"duration":null}
-        """.data(using: .utf8)!
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        let call = try d.decode(CallRecord.self, from: json)
+    func testDecodesDatabaseRecords() throws {
+        let call = try JSONDecoder.firebase.decode(CallRecord.self, from: Data("""
+        {"caller":"uidA","callee":"uidB","callerName":"Alex","status":"ringing",
+         "createdAt":1795000000000,"expiresAt":1795000045000}
+        """.utf8))
         XCTAssertEqual(call.status, .ringing)
-        XCTAssertTrue(call.status.isActive)
+        XCTAssertEqual(call.caller, "uidA")
         XCTAssertTrue(call.isExpired(now: call.expiresAt.addingTimeInterval(1)))
-        XCTAssertFalse(call.isExpired(now: call.createdAt))
+        XCTAssertFalse(call.isExpired(now: call.createdAt!))
+
+        let ring = try JSONDecoder.firebase.decode(RingEntry.self, from: Data(#"{"caller":"uidA","expiresAt":1795000045000}"#.utf8))
+        XCTAssertEqual(ring.expiresAt, call.expiresAt)
+    }
+
+    func testUserRecordPresence() {
+        let now = Date()
+        XCTAssertEqual(UserRecord(status: .online, online: true, lastSeen: now).presence(now: now), .online)
+        XCTAssertEqual(UserRecord(status: .online, online: false, lastSeen: now).presence(now: now), .offline, "quit / signed out")
+        XCTAssertEqual(UserRecord(status: .online, online: true, lastSeen: now.addingTimeInterval(-90)).presence(now: now), .offline, "stale heartbeat")
+        XCTAssertEqual(UserRecord(status: .dnd, online: true, lastSeen: now).presence(now: now), .dnd)
+        XCTAssertEqual(UserRecord(status: .online, online: true, lastSeen: now,
+                                  inCall: .init(callId: "c1", at: now)).presence(now: now), .inCall)
+        XCTAssertEqual(UserRecord(status: .online, online: true, lastSeen: now,
+                                  inCall: .init(callId: "c1", at: now.addingTimeInterval(-200))).presence(now: now), .online,
+                       "an old in-call marker from a crash is ignored")
+    }
+
+    func testEmailKeysMatchDatabaseRules() {
+        XCTAssertEqual(EmailKey.of(" Alex.J@Gmail.com "), "alex,j@gmail,com")
     }
 
     func testEmailValidation() {
@@ -63,16 +79,18 @@ final class PresenceAndModelTests: XCTestCase {
 
     func testConfigurationRequiresRealValues() {
         XCTAssertFalse(AppConfiguration(infoDictionary: [:]).isConfigured)
-        XCTAssertFalse(AppConfiguration(infoDictionary: ["MacTalkSupabaseURL": "https://x.supabase.co",
-                                                         "MacTalkSupabaseAnonKey": "YOUR_ANON_KEY_GOES_HERE_PLEASE"]).isConfigured)
-        XCTAssertFalse(AppConfiguration(infoDictionary: ["MacTalkSupabaseURL": "http://x.supabase.co",
-                                                         "MacTalkSupabaseAnonKey": String(repeating: "k", count: 40)]).isConfigured,
-                       "plain http is rejected")
-        let ok = AppConfiguration(infoDictionary: ["MacTalkSupabaseURL": "https://x.supabase.co",
-                                                   "MacTalkSupabaseAnonKey": String(repeating: "k", count: 40),
-                                                   "MacTalkEnvironment": "staging"])
+        let base: [String: Any] = ["MacTalkFirebaseAPIKey": String(repeating: "k", count: 39),
+                                   "MacTalkDatabaseURL": "https://x-default-rtdb.firebaseio.com",
+                                   "MacTalkAuthPageURL": "https://x.github.io/MacTalk/auth/",
+                                   "MacTalkEnvironment": "staging", "MacTalkTurnURLs": "turn:a:3478, turns:b:5349"]
+        let ok = AppConfiguration(infoDictionary: base)
         XCTAssertTrue(ok.isConfigured)
         XCTAssertEqual(ok.environment, .staging)
+        XCTAssertEqual(ok.turnURLs, ["turn:a:3478", "turns:b:5349"])
+        var placeholder = base; placeholder["MacTalkFirebaseAPIKey"] = "YOUR_FIREBASE_WEB_API_KEY_HERE"
+        XCTAssertFalse(AppConfiguration(infoDictionary: placeholder).isConfigured)
+        var http = base; http["MacTalkDatabaseURL"] = "http://x.firebaseio.com"
+        XCTAssertFalse(AppConfiguration(infoDictionary: http).isConfigured, "plain http is rejected")
     }
 
     func testConnectionQuality() {

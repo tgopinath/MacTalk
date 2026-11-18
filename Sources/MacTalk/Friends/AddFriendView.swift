@@ -7,6 +7,7 @@ struct AddFriendView: View {
     @State private var busy = false
     @State private var result: String?
     @State private var error: String?
+    @State private var lastInvited: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -18,15 +19,19 @@ struct AddFriendView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Add a friend").font(.title2.weight(.semibold))
-                    Text("They'll get an invitation. You can call each other once they accept.")
+                    Text("Use the email of their Google account. You can call each other once they accept.")
                         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             TextField("friend@example.com", text: $email)
                 .textFieldStyle(.roundedBorder).controlSize(.large)
                 .focused($focused).onSubmit(send)
-                .onChange(of: email) { _, _ in error = nil; result = nil }
-            if let result { Banner(kind: .info, text: result) }
+                .onChange(of: email) { _, new in if !new.isEmpty { error = nil; result = nil } }
+            if let result {
+                Banner(kind: .info, text: result, actionTitle: lastInvited == nil ? nil : "Email Them") {
+                    if let to = lastInvited { model.friends?.composeInvitationEmail(to: to, fromName: model.auth?.profile?.name ?? "") }
+                }
+            }
             if let error { Banner(kind: .error, text: error) }
             Spacer(minLength: 0)
             HStack {
@@ -58,7 +63,9 @@ struct AddFriendView: View {
         Task {
             defer { busy = false }
             do {
-                result = try await friends.invite(email: email)
+                let profile = model.auth?.profile
+                result = try await friends.invite(email: email, myName: profile?.name ?? "", myPhoto: profile?.avatarURL)
+                lastInvited = EmailValidator.normalize(email)
                 email = ""
             } catch {
                 self.error = (error as? MacTalkError)?.errorDescription ?? error.localizedDescription

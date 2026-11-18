@@ -1,19 +1,17 @@
 import SwiftUI
 
-/// The MacTalk app mark: a rounded tile with a walkie-talkie glyph.
+/// The MacTalk mark: the walkie-talkie glyph on its own, filling the given size.
 struct AppMark: View {
     var size: CGFloat = 22
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(LinearGradient(colors: [Color(red: 0.24, green: 0.56, blue: 1), Color(red: 0.14, green: 0.36, blue: 0.95)],
-                                 startPoint: .top, endPoint: .bottom))
+        Image(systemName: "flipphone")
+            .resizable()
+            .scaledToFit()
+            .fontWeight(.semibold)
+            .foregroundStyle(LinearGradient(colors: [Color(red: 0.24, green: 0.56, blue: 1), Color(red: 0.14, green: 0.36, blue: 0.95)],
+                                            startPoint: .top, endPoint: .bottom))
             .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: "flipphone")
-                    .font(.system(size: size * 0.52, weight: .semibold))
-                    .foregroundStyle(.white)
-            )
-            .shadow(color: .blue.opacity(0.25), radius: size * 0.12, y: size * 0.05)
+            .accessibilityHidden(true)
     }
 }
 

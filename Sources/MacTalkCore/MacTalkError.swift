@@ -10,12 +10,14 @@ public enum MacTalkError: Error, Equatable, Sendable, LocalizedError {
     case invalidCode
     case rateLimited
     case notFriends
+    case permissionDenied
+    case signInCancelled
     case friendOffline(String)
     case friendBusy(String)
     case friendDND(String)
     case friendInCall(String)
     case alreadyInCall
-    case crossedCall(UUID)
+    case crossedCall(CallID)
     case callExpired
     case callNotFound
     case microphoneDenied
@@ -26,7 +28,7 @@ public enum MacTalkError: Error, Equatable, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notConfigured: "MacTalk isn't connected to a server yet. Add your Supabase URL and key in Config/ and rebuild."
+        case .notConfigured: "MacTalk isn't connected to Firebase yet. Add the Firebase settings in Config/ and rebuild."
         case .notAuthenticated: "Please sign in to continue."
         case .sessionExpired: "Your session expired. Please sign in again."
         case .emailNotVerified: "Verify your email before making or receiving calls."
@@ -34,6 +36,8 @@ public enum MacTalkError: Error, Equatable, Sendable, LocalizedError {
         case .invalidCode: "That code didn't work. Check the latest email and try again."
         case .rateLimited: "You're doing that a bit too often. Wait a minute and try again."
         case .notFriends: "You can only call people who accepted your invitation."
+        case .permissionDenied: "MacTalk's server didn't allow that. Check that you're still friends and try again."
+        case .signInCancelled: "Sign-in was cancelled."
         case .friendOffline(let n): "\(n) is offline right now."
         case .friendBusy(let n): "\(n) is busy right now."
         case .friendDND(let n): "\(n) has Do Not Disturb on."
@@ -64,10 +68,11 @@ public enum MacTalkError: Error, Equatable, Sendable, LocalizedError {
         if has("friend_busy") { return .friendBusy(peerName) }
         if has("friend_in_call") { return .friendInCall(peerName) }
         if has("already_in_call") { return .alreadyInCall }
-        if has("crossed_call"), let detail, let id = UUID(uuidString: detail) { return .crossedCall(id) }
+        if has("crossed_call"), let detail { return .crossedCall(detail) }
+        if has("permission denied") || has("permission_denied") { return .permissionDenied }
+        if has("token_expired") || has("invalid_refresh_token") || has("user_disabled") || has("user_not_found") { return .sessionExpired }
         if has("call_expired") || has("call_not_ringing") { return .callExpired }
         if has("call_not_found") { return .callNotFound }
-        if has("token has expired") || has("otp") && has("invalid") { return .invalidCode }
         return .server(message)
     }
 }

@@ -3,7 +3,7 @@ import XCTest
 
 final class SpeedDialTests: XCTestCase {
     private func friends(_ names: [String]) -> [Friend] {
-        names.map { Friend(id: UUID(), email: "\($0.lowercased())@example.com", displayName: $0, presenceStatus: .online, lastSeen: Date()) }
+        names.map { Friend(id: UUID().uuidString, email: "\($0.lowercased())@example.com", displayName: $0, presenceStatus: .online, lastSeen: Date()) }
     }
 
     func testDefaultsToAlphabeticalOrder() {

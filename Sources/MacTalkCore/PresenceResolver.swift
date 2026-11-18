@@ -4,6 +4,8 @@ public enum PresenceResolver {
     /// Heartbeats are sent every 25 s; after 60 s of silence a user is considered offline.
     public static let staleAfter: TimeInterval = 60
     public static let heartbeatInterval: TimeInterval = 25
+    /// `inCall` markers are refreshed by the heartbeat; an old one means the app crashed mid-call.
+    public static let inCallStaleAfter: TimeInterval = 90
 
     public static func effective(status: PresenceStatus, lastSeen: Date?, now: Date = Date()) -> PresenceStatus {
         guard let lastSeen, now.timeIntervalSince(lastSeen) < staleAfter else { return .offline }

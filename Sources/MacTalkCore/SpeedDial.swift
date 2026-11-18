@@ -4,9 +4,9 @@ import Foundation
 /// they haven't placed yet fill the remaining slots alphabetically.
 public struct SpeedDial: Sendable, Equatable {
     public static let maxSlots = 9
-    public private(set) var order: [UUID]
+    public private(set) var order: [UserID]
 
-    public init(order: [UUID] = []) { self.order = order }
+    public init(order: [UserID] = []) { self.order = order }
 
     /// Friends in speed-dial order, keeping only current friends and appending new ones.
     public func ordered(_ friends: [Friend]) -> [Friend] {
@@ -25,7 +25,7 @@ public struct SpeedDial: Sendable, Equatable {
         return slot <= list.count ? list[slot - 1] : nil
     }
 
-    public func slot(for friendID: UUID, in friends: [Friend]) -> Int? {
+    public func slot(for friendID: UserID, in friends: [Friend]) -> Int? {
         guard let index = ordered(friends).firstIndex(where: { $0.id == friendID }), index < Self.maxSlots else { return nil }
         return index + 1
     }

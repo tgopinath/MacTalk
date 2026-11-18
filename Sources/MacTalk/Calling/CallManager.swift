@@ -2,23 +2,24 @@ import AppKit
 import Foundation
 import MacTalkCore
 import Observation
-import Supabase
 @preconcurrency import WebRTC
 
 /// Drives one call at a time from "Call" (or an incoming ring) to hang-up.
 ///
-/// Flow
-/// 1. Caller: `start_call` RPC (server checks friendship, blocking, presence, busy, rate
-///    limit and races) → row inserted with status `ringing`.
-/// 2. Callee: receives the row via Realtime (or the heartbeat fallback) → ringtone +
-///    bottom-right alert. No microphone is opened while ringing.
-/// 3. Callee accepts → `answer_call` → both sides open WebRTC. The caller sends the SDP
-///    offer, the callee answers, ICE candidates trickle through `call_signals`.
-/// 4. Either side ends → `end_call`; the other side sees the status change.
+/// Flow (Realtime Database, every write checked by database.rules.json)
+/// 1. Caller writes `calls/{id}` (status `ringing`) and `u/{callee}/rings/{id}` in one atomic
+///    update. The rules only allow it between mutual friends, neither blocked, callee online,
+///    not DND/busy, not already in a call, and at most one call every 3 s.
+/// 2. Callee's `u/{uid}` stream sees the ring → ringtone + bottom-right alert. The microphone
+///    is not opened while ringing.
+/// 3. Callee accepts → status `accepted` → both sides open WebRTC. The caller sends the SDP
+///    offer; answer and ICE candidates flow through `calls/{id}/signals` (writable only by the
+///    two participants, only after acceptance).
+/// 4. Either side ends → status `ended`; the caller deletes the call record shortly after.
 @MainActor @Observable
 final class CallManager {
     struct Session {
-        var callID: UUID?
+        var callID: CallID?
         let direction: CallDirection
         let peer: CallPeer
         var machine: CallStateMachine
@@ -35,12 +36,12 @@ final class CallManager {
     private(set) var session: Session?
     /// Short-lived message for the popover ("Alex is offline right now.").
     var toast: String?
-
     /// Fired whenever `session` changes so the app can show / hide call windows.
     var onChange: (() -> Void)?
+    /// Current user's display name / photo, used on the callee's ring.
+    var myIdentity: (() -> (name: String, photo: String?))?
 
     private let backend: Backend
-    private let hub: RealtimeHub
     private let settings: SettingsStore
     private let notifications: NotificationService
     private let friends: FriendsService
@@ -48,37 +49,52 @@ final class CallManager {
     private let routing = CallAudioRouting()
 
     private var rtc: WebRTCClient?
-    private var signalChannel: RealtimeChannelV2?
+    private var callStream: Task<Void, Never>?
     private var inbox = SignalInbox()
     private var signalChain: Task<Void, Never>?
     private var timers: [Task<Void, Never>] = []
     private var pollTask: Task<Void, Never>?
     private var qualityTask: Task<Void, Never>?
     private var restartTask: Task<Void, Never>?
-    private var handledCallIDs: Set<UUID> = []
+    private var handledCallIDs: Set<CallID> = []
     private var toastTask: Task<Void, Never>?
 
-    init(backend: Backend, hub: RealtimeHub, settings: SettingsStore, notifications: NotificationService, friends: FriendsService) {
+    init(backend: Backend, settings: SettingsStore, notifications: NotificationService, friends: FriendsService) {
         self.backend = backend
-        self.hub = hub
         self.settings = settings
         self.notifications = notifications
         self.friends = friends
     }
 
-    private var me: UUID? { backend.currentUserID }
+    private var me: UserID? { backend.currentUserID }
+    private var db: RealtimeDatabase { backend.db }
     private var isOfferer: Bool { session?.direction == .outgoing }
+
+    /// The call this user is part of right now (for the presence heartbeat).
+    var activeCallID: CallID? {
+        guard let s = session, !s.phase.isTerminal else { return nil }
+        return s.callID
+    }
 
     // MARK: - Outgoing
 
     func call(_ friend: Friend) async {
-        if let session, !session.phase.isTerminal {
-            if session.peer.id == friend.id { return } // duplicate click
+        if let s = session, !s.phase.isTerminal {
+            if s.peer.id == friend.id {
+                // They're ringing us right now: pick up instead of calling back.
+                if s.direction == .incoming && s.phase == .ringing { await accept() }
+                return
+            }
             show(toast: MacTalkError.alreadyInCall.errorDescription)
             return
         }
-        guard friend.effectivePresence().isCallable else {
-            let error: MacTalkError = switch friend.effectivePresence() {
+        guard let me else { return }
+
+        // Fresh presence check so the message is specific (the database rules enforce it anyway).
+        let record = (try? await db.get("users/\(friend.id)", as: UserRecord.self)) ?? nil
+        let presence = record?.presence() ?? friend.effectivePresence()
+        guard presence.isCallable else {
+            let error: MacTalkError = switch presence {
             case .busy: .friendBusy(friend.name)
             case .dnd: .friendDND(friend.name)
             case .inCall: .friendInCall(friend.name)
@@ -89,105 +105,112 @@ final class CallManager {
         }
         // Ask for the microphone before ringing anyone (no audio is captured yet).
         guard await MicrophonePermission.ensure() else {
-            show(toast: MacTalkError.microphoneDenied.errorDescription)
-            session = Session(callID: nil, direction: .outgoing, peer: CallPeer(friend: friend),
-                              machine: CallStateMachine(direction: .outgoing), micDenied: true)
-            session?.machine.transition(to: .failed)
-            session?.detail = MacTalkError.microphoneDenied.errorDescription
+            var s = Session(callID: nil, direction: .outgoing, peer: CallPeer(friend: friend),
+                            machine: .forcedTerminal(direction: .outgoing, phase: .failed), micDenied: true)
+            s.detail = MacTalkError.microphoneDenied.errorDescription
+            session = s
             changed()
             return
         }
 
-        session = Session(callID: nil, direction: .outgoing, peer: CallPeer(friend: friend),
-                          machine: CallStateMachine(direction: .outgoing))
+        let callID = Self.newCallID()
+        let expiresAt = Date().addingTimeInterval(45)
+        session = Session(callID: callID, direction: .outgoing, peer: CallPeer(friend: friend),
+                          machine: CallStateMachine(direction: .outgoing), expiresAt: expiresAt)
+        handledCallIDs.insert(callID)
         changed()
 
+        let identity = myIdentity?() ?? (name: "", photo: nil)
+        let ts = RealtimeDatabase.serverTimestamp
+        let expiresMs = Int(expiresAt.timeIntervalSince1970 * 1000)
         do {
-            let record: CallRecord = try await backend.rpc("start_call", ["p_receiver_id": .uuid(friend.id)], peerName: friend.name)
-            guard session?.callID == nil, session?.peer.id == friend.id else {
-                // The user cancelled while the request was in flight.
-                _ = try? await backend.rpc("cancel_call", ["p_call_id": .uuid(record.id)], as: CallRecord.self)
-                return
-            }
-            handledCallIDs.insert(record.id)
-            session?.callID = record.id
-            session?.expiresAt = record.expiresAt
-            session?.machine.transition(to: .ringing)
-            changed()
-            startPolling()
-            schedule(at: record.expiresAt.addingTimeInterval(1)) { [weak self] in
-                guard let self, self.session?.callID == record.id, self.session?.phase == .ringing else { return }
-                await self.cancelOutgoing(reason: .missed)
-            }
-        } catch let error as MacTalkError {
-            if case .crossedCall(let incomingID) = error {
-                // We both pressed Call at the same time: just pick up their call.
-                session = nil
-                await adoptCrossedCall(incomingID)
-                return
-            }
-            let phase: CallPhase = switch error {
-            case .friendInCall, .friendBusy: .busy
-            default: .failed
-            }
-            finish(phase, detail: error.errorDescription)
+            try await db.update([
+                "calls/\(callID)": ["caller": me, "callee": friend.id, "callerName": identity.name,
+                                    "callerPhoto": identity.photo ?? NSNull(), "status": "ringing",
+                                    "createdAt": ts, "expiresAt": expiresMs],
+                "u/\(friend.id)/rings/\(callID)": ["caller": me, "callerName": identity.name,
+                                                   "callerPhoto": identity.photo ?? NSNull(), "expiresAt": expiresMs],
+                "users/\(me)/lastCallAt": ts,
+                "users/\(me)/inCall": ["callId": callID, "at": ts],
+            ])
         } catch {
-            finish(.failed, detail: Backend.map(error).errorDescription)
+            let mapped = Backend.map(error)
+            finish(.failed, detail: mapped == .permissionDenied
+                   ? "Couldn't ring \(friend.name). They may have just gone offline or busy."
+                   : mapped.errorDescription)
+            return
+        }
+        guard session?.callID == callID, session?.phase == .initiating else { return } // cancelled meanwhile
+        session?.machine.transition(to: .ringing)
+        changed()
+        observeCall(callID)
+        startPolling()
+        schedule(at: expiresAt.addingTimeInterval(1)) { [weak self] in
+            guard let self, self.session?.callID == callID, self.session?.phase == .ringing else { return }
+            await self.cancelOutgoing(reason: .missed)
         }
     }
 
-    private func adoptCrossedCall(_ callID: UUID) async {
-        guard let record: CallRecord = try? await backend.client.from("calls").select().eq("id", value: callID).single().execute().value else { return }
-        await presentIncoming(record)
-        await accept()
+    /// Chronological, collision-resistant id (like a Firebase push key).
+    static func newCallID() -> CallID {
+        let ms = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36)
+        let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789")
+        return "c" + ms + String((0..<10).map { _ in alphabet.randomElement()! })
     }
 
     // MARK: - Incoming
 
-    /// Entry point for every call row we learn about (Realtime, heartbeat fallback, polling).
-    func handleServer(_ record: CallRecord) {
-        guard let me else { return }
-        if let session, session.callID == record.id {
-            apply(record)
-            return
-        }
-        if record.receiverID == me, record.status == .ringing, !record.isExpired(), !handledCallIDs.contains(record.id) {
-            Task { await presentIncoming(record) }
+    /// Rings from the live `u/{uid}` stream or the heartbeat fallback.
+    func handleRings(_ rings: [CallID: RingEntry]) {
+        let now = Date()
+        for (id, ring) in rings.sorted(by: { $0.key < $1.key }) where !handledCallIDs.contains(id) {
+            if ring.expiresAt < now {
+                handledCallIDs.insert(id)
+                if let me { Task { try? await db.delete("u/\(me)/rings/\(id)") } }
+                continue
+            }
+            Task { await presentIncoming(id: id, ring: ring) }
         }
     }
 
-    private func presentIncoming(_ record: CallRecord) async {
-        guard !handledCallIDs.contains(record.id) else { return }
-        if let session, !session.phase.isTerminal { return } // server already prevents this
-        handledCallIDs.insert(record.id)
-
-        var peer = friends.friend(id: record.callerID).map(CallPeer.init(friend:))
-        if peer == nil {
-            let peers: [CallPeer] = (try? await backend.rpc("get_call_peer", ["p_call_id": .uuid(record.id)])) ?? []
-            peer = peers.first
+    private func presentIncoming(id: CallID, ring: RingEntry) async {
+        guard !handledCallIDs.contains(id), let me else { return }
+        handledCallIDs.insert(id)
+        if let s = session, !s.phase.isTerminal {
+            // Already talking to someone: tell this caller we're busy.
+            try? await db.update(["calls/\(id)/status": "busy", "calls/\(id)/endedAt": RealtimeDatabase.serverTimestamp,
+                                  "u/\(me)/rings/\(id)": NSNull()])
+            return
         }
-        guard let peer else { return }
+        guard let record = try? await db.get("calls/\(id)", as: CallRecord.self), record.status == .ringing,
+              record.callee == me else {
+            try? await db.delete("u/\(me)/rings/\(id)")
+            return
+        }
+        let friend = friends.friend(id: ring.caller)
+        let peer = friend.map(CallPeer.init(friend:))
+            ?? CallPeer(id: ring.caller, displayName: ring.callerName, avatarURL: ring.callerPhoto, email: nil)
 
-        var machine = CallStateMachine(direction: .incoming)
-        machine.apply(serverStatus: record.status)
-        session = Session(callID: record.id, direction: .incoming, peer: peer, machine: machine, expiresAt: record.expiresAt)
+        session = Session(callID: id, direction: .incoming, peer: peer, machine: CallStateMachine(direction: .incoming),
+                          expiresAt: ring.expiresAt)
         changed()
+        observeCall(id)
 
         if settings.ringtoneEnabled { ringtone.start(name: settings.ringtoneName, volume: settings.ringtoneVolume) }
         if settings.notificationsEnabled, settings.alertStyle != .callWindow {
-            notifications.showIncomingCall(callID: record.id, callerName: peer.name, preview: settings.preview,
+            notifications.showIncomingCall(callID: id, callerName: peer.name, preview: settings.preview,
                                            avatar: await AvatarImageLoader.image(for: peer.avatarURL))
         }
         startPolling()
-        schedule(at: record.expiresAt) { [weak self] in
-            guard let self, self.session?.callID == record.id, self.session?.phase == .ringing else { return }
+        schedule(at: ring.expiresAt) { [weak self] in
+            guard let self, self.session?.callID == id, self.session?.phase == .ringing else { return }
             self.notifications.showMissedCall(from: peer, preview: self.settings.preview)
             self.finish(.missed, detail: "Missed call from \(peer.name)")
         }
     }
 
     func accept() async {
-        guard var s = session, s.direction == .incoming, s.phase == .ringing, let callID = s.callID else { return }
+        guard var s = session, s.direction == .incoming, s.phase == .ringing, let callID = s.callID, let me else { return }
         ringtone.stop()
         notifications.clearIncomingCall(callID)
         NSApp.activate(ignoringOtherApps: true)
@@ -199,18 +222,21 @@ final class CallManager {
             changed()
             return
         }
+        let ts = RealtimeDatabase.serverTimestamp
         do {
-            let record: CallRecord = try await backend.rpc("answer_call", ["p_call_id": .uuid(callID), "p_accept": .bool(true)])
-            apply(record)
+            try await db.update(["calls/\(callID)/status": "accepted", "calls/\(callID)/acceptedAt": ts,
+                                 "users/\(me)/inCall": ["callId": callID, "at": ts], "u/\(me)/rings/\(callID)": NSNull()])
+            applyStatus(.accepted)
         } catch {
-            finish(.missed, detail: Backend.map(error).errorDescription)
+            finish(.missed, detail: MacTalkError.callExpired.errorDescription)
         }
     }
 
     func decline() async {
-        guard let s = session, s.direction == .incoming, let callID = s.callID, s.phase == .ringing else { return }
+        guard let s = session, s.direction == .incoming, let callID = s.callID, s.phase == .ringing, let me else { return }
         ringtone.stop()
-        _ = try? await backend.rpc("answer_call", ["p_call_id": .uuid(callID), "p_accept": .bool(false)], as: CallRecord.self)
+        try? await db.update(["calls/\(callID)/status": "declined", "calls/\(callID)/endedAt": RealtimeDatabase.serverTimestamp,
+                              "u/\(me)/rings/\(callID)": NSNull()])
         finish(.declined, detail: nil, linger: false)
     }
 
@@ -224,18 +250,22 @@ final class CallManager {
         case (.incoming, .ringing): await decline()
         case (.outgoing, .initiating), (.outgoing, .ringing): await cancelOutgoing(reason: .cancelled)
         default:
-            if let callID = s.callID {
-                _ = try? await backend.rpc("end_call", ["p_call_id": .uuid(callID), "p_reason": .string("hangup")], as: CallRecord.self)
-            }
-            await sendSignal(.bye, .init())
+            await writeEnd(status: "ended")
             finish(.ended, detail: nil)
         }
+    }
+
+    private func writeEnd(status: String) async {
+        guard let callID = session?.callID else { return }
+        try? await db.update(["calls/\(callID)/status": status, "calls/\(callID)/endedAt": RealtimeDatabase.serverTimestamp])
     }
 
     private func cancelOutgoing(reason: CallPhase) async {
         guard let s = session else { return }
         if let callID = s.callID {
-            _ = try? await backend.rpc("cancel_call", ["p_call_id": .uuid(callID)], as: CallRecord.self)
+            try? await db.update(["calls/\(callID)/status": reason == .missed ? "missed" : "cancelled",
+                                  "calls/\(callID)/endedAt": RealtimeDatabase.serverTimestamp,
+                                  "u/\(s.peer.id)/rings/\(callID)": NSNull()])
         }
         finish(reason, detail: reason == .missed ? "\(s.peer.name) didn't answer." : nil, linger: reason == .missed)
     }
@@ -249,10 +279,31 @@ final class CallManager {
 
     // MARK: - Server state
 
-    private func apply(_ record: CallRecord) {
-        guard var s = session, s.callID == record.id else { return }
+    private func observeCall(_ callID: CallID) {
+        callStream?.cancel()
+        let stream = db.observe("calls/\(callID)")
+        callStream = Task { [weak self] in
+            for await tree in stream {
+                guard let self, self.session?.callID == callID else { return }
+                self.handleCallTree(tree.value, callID: callID)
+            }
+        }
+    }
+
+    private func handleCallTree(_ tree: Any?, callID: CallID) {
+        guard let node = tree as? [String: Any] else {
+            // The call record was deleted by the other side.
+            if session?.phase.isTerminal == false { finish(.ended, detail: nil) }
+            return
+        }
+        if let status = (node["status"] as? String).flatMap(CallRecordStatus.init(rawValue:)) { applyStatus(status) }
+        if rtc != nil, let signals = node["signals"] as? [String: Any] { ingest(signals) }
+    }
+
+    private func applyStatus(_ status: CallRecordStatus) {
+        guard var s = session else { return }
         let before = s.phase
-        s.machine.apply(serverStatus: record.status)
+        s.machine.apply(serverStatus: status)
         session = s
         guard s.phase != before else { return }
 
@@ -286,12 +337,9 @@ final class CallManager {
         ringtone.stop()
         session?.machine.transition(to: .connecting)
         changed()
-        _ = try? await backend.rpc("update_call_state", ["p_call_id": .uuid(callID), "p_status": .string("connecting")], as: CallRecord.self)
+        try? await db.update(["calls/\(callID)/status": "connecting"])
 
         routing.apply(inputUID: settings.inputDeviceUID, outputUID: settings.outputDeviceUID)
-        let iceServers = await fetchIceServers()
-        guard session?.callID == callID, session?.phase.isTerminal == false else { return }
-
         let client = WebRTCClient(iceServers: iceServers) { [weak self] event in
             Task { @MainActor in self?.handle(event, callID: callID) }
         }
@@ -299,8 +347,6 @@ final class CallManager {
         client.setOutputVolume(settings.outputVolume)
         rtc = client
         inbox = SignalInbox()
-
-        signalChannel = await hub.signals(callID: callID) { [weak self] row in self?.enqueue(row) }
         await catchUpSignals()
 
         if isOfferer {
@@ -318,17 +364,16 @@ final class CallManager {
         }
     }
 
-    private func fetchIceServers() async -> [IceServerConfig] {
-        struct Response: Decodable { let iceServers: [IceServerConfig] }
-        do {
-            let response: Response = try await backend.client.functions.invoke("turn-credentials", options: .init(method: .post))
-            return response.iceServers.isEmpty ? IceServerConfig.publicSTUN : response.iceServers
-        } catch {
-            return IceServerConfig.publicSTUN
+    private var iceServers: [IceServerConfig] {
+        var servers = IceServerConfig.publicSTUN
+        let c = backend.configuration
+        if !c.turnURLs.isEmpty {
+            servers.append(IceServerConfig(urls: c.turnURLs, username: c.turnUsername, credential: c.turnCredential))
         }
+        return servers
     }
 
-    private func handle(_ event: WebRTCClient.Event, callID: UUID) {
+    private func handle(_ event: WebRTCClient.Event, callID: CallID) {
         guard session?.callID == callID else { return }
         switch event {
         case .localCandidate(let payload):
@@ -340,7 +385,10 @@ final class CallManager {
                 if session?.machine.transition(to: .connected) == true {
                     if session?.connectedAt == nil {
                         session?.connectedAt = Date()
-                        Task { _ = try? await backend.rpc("update_call_state", ["p_call_id": .uuid(callID), "p_status": .string("connected")], as: CallRecord.self) }
+                        Task {
+                            try? await db.update(["calls/\(callID)/status": "connected",
+                                                  "calls/\(callID)/connectedAt": RealtimeDatabase.serverTimestamp])
+                        }
                     }
                     session?.detail = nil
                     startQualitySampling()
@@ -372,6 +420,7 @@ final class CallManager {
                 changed()
             }
         } else {
+            if let callID = session?.callID { observeCall(callID) }
             scheduleIceRestart(after: .milliseconds(500))
         }
     }
@@ -396,31 +445,39 @@ final class CallManager {
     }
 
     private func fail() async {
-        guard let callID = session?.callID, session?.phase.isTerminal == false else { return }
-        _ = try? await backend.rpc("end_call", ["p_call_id": .uuid(callID), "p_reason": .string("failed")], as: CallRecord.self)
+        guard session?.callID != nil, session?.phase.isTerminal == false else { return }
+        await writeEnd(status: "failed")
         finish(.failed, detail: MacTalkError.webRTCFailed.errorDescription)
     }
 
     // MARK: - Signaling
 
     private func sendSignal(_ kind: SignalKind, _ payload: SignalPayload) async {
-        guard let s = session, let callID = s.callID, let me else { return }
-        let row = SignalRow(callID: callID, senderID: me, recipientID: s.peer.id, kind: kind, payload: payload)
-        _ = try? await backend.client.from("call_signals").insert(row).execute()
+        guard let callID = session?.callID, let me,
+              let body = try? JSONSerialization.jsonObject(with: JSONEncoder.firebase.encode(SignalRow(from: me, kind: kind, payload: payload)))
+        else { return }
+        _ = try? await db.push("calls/\(callID)/signals", body)
     }
 
-    /// Fetches any signals Realtime didn't deliver (subscribe race, brief disconnect).
+    /// Fetches signals the live stream may not have delivered yet.
     private func catchUpSignals() async {
-        guard let callID = session?.callID, let me else { return }
-        let rows: [SignalRow] = (try? await backend.client.from("call_signals").select()
-            .eq("call_id", value: callID).eq("recipient_id", value: me)
-            .gt("id", value: inbox.lastProcessedID).order("id").execute().value) ?? []
-        rows.forEach(enqueue)
+        guard let callID = session?.callID,
+              let signals = try? await db.getJSON("calls/\(callID)/signals") as? [String: Any] else { return }
+        ingest(signals)
+    }
+
+    private func ingest(_ signals: [String: Any]) {
+        guard let me else { return }
+        for key in signals.keys.sorted() {
+            guard var row: SignalRow = JSONTree.decode(signals[key]), row.from != me else { continue }
+            row.key = key
+            enqueue(row)
+        }
     }
 
     /// Processes signals strictly in order.
     private func enqueue(_ row: SignalRow) {
-        guard row.callID == session?.callID, inbox.accept(row) else { return }
+        guard inbox.accept(row) else { return }
         let previous = signalChain
         signalChain = Task { [weak self] in
             await previous?.value
@@ -458,8 +515,8 @@ final class CallManager {
 
     // MARK: - Fallback polling
 
-    /// While a call is ringing or connecting, re-read the call row and signals every 3 s in
-    /// case a Realtime event was missed. Stops once the call is connected or over.
+    /// While a call is ringing or connecting, re-read the call every 3 s in case the live
+    /// stream missed an update. Stops once the call is connected or over.
     private func startPolling() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
@@ -467,11 +524,9 @@ final class CallManager {
                 try? await Task.sleep(for: .seconds(3))
                 guard let self, let s = self.session, let callID = s.callID, !s.phase.isTerminal else { break }
                 if s.phase == .connected { continue }
-                if let record: CallRecord = try? await self.backend.client.from("calls").select()
-                    .eq("id", value: callID).single().execute().value {
-                    self.apply(record)
+                if let tree = try? await self.db.getJSON("calls/\(callID)") {
+                    self.handleCallTree(tree, callID: callID)
                 }
-                if self.rtc != nil { await self.catchUpSignals() }
             }
             self?.pollTask = nil
         }
@@ -507,15 +562,16 @@ final class CallManager {
     func switchInput(to uid: String) { routing.switchInput(to: uid) }
     func switchOutput(to uid: String) { routing.switchOutput(to: uid) }
 
-    /// Called on quit: end any call cleanly so the friend isn't left hanging.
+    /// Called on quit / sign-out: end any call cleanly so the friend isn't left hanging.
     func endForTermination() async {
         guard let s = session, !s.phase.isTerminal, let callID = s.callID else { return }
-        if s.direction == .outgoing, s.phase == .ringing {
-            _ = try? await backend.rpc("cancel_call", ["p_call_id": .uuid(callID)], as: CallRecord.self)
-        } else if s.direction == .incoming, s.phase == .ringing {
-            _ = try? await backend.rpc("answer_call", ["p_call_id": .uuid(callID), "p_accept": .bool(false)], as: CallRecord.self)
-        } else {
-            _ = try? await backend.rpc("end_call", ["p_call_id": .uuid(callID), "p_reason": .string("app_quit")], as: CallRecord.self)
+        switch (s.direction, s.phase) {
+        case (.outgoing, .ringing), (.outgoing, .initiating):
+            try? await db.update(["calls/\(callID)/status": "cancelled", "u/\(s.peer.id)/rings/\(callID)": NSNull()])
+        case (.incoming, .ringing):
+            try? await db.update(["calls/\(callID)/status": "declined", "u/\(me ?? "")/rings/\(callID)": NSNull()])
+        default:
+            await writeEnd(status: "ended")
         }
         teardownMedia()
     }
@@ -528,11 +584,12 @@ final class CallManager {
         teardownMedia()
         guard var s = session else { return }
         if !s.machine.transition(to: phase), !s.phase.isTerminal {
-            s.machine = CallStateMachine.forcedTerminal(direction: s.direction, phase: phase)
+            s.machine = .forcedTerminal(direction: s.direction, phase: phase)
         }
         s.detail = detail
         session = s
         changed()
+        cleanUp(s)
         let finished = s.callID
         if linger {
             schedule(after: .seconds(2.5)) { [weak self] in
@@ -546,6 +603,21 @@ final class CallManager {
         }
     }
 
+    /// Clears this user's busy marker; the caller removes the call record once the other
+    /// side has had time to see the final status.
+    private func cleanUp(_ s: Session) {
+        guard let me, let callID = s.callID else { return }
+        let db = self.db
+        Task {
+            var values: [String: Any] = ["users/\(me)/inCall": NSNull()]
+            if s.direction == .incoming { values["u/\(me)/rings/\(callID)"] = NSNull() }
+            try? await db.update(values)
+            guard s.direction == .outgoing else { return }
+            try? await Task.sleep(for: .seconds(15))
+            try? await db.update(["calls/\(callID)": NSNull(), "u/\(s.peer.id)/rings/\(callID)": NSNull()])
+        }
+    }
+
     private func teardownMedia() {
         timers.forEach { $0.cancel() }
         timers.removeAll()
@@ -553,12 +625,9 @@ final class CallManager {
         qualityTask?.cancel(); qualityTask = nil
         restartTask?.cancel(); restartTask = nil
         signalChain?.cancel(); signalChain = nil
+        callStream?.cancel(); callStream = nil
         rtc?.close()
         rtc = nil
-        if let channel = signalChannel {
-            signalChannel = nil
-            Task { await hub.remove(channel) }
-        }
         routing.restore()
     }
 
@@ -595,7 +664,7 @@ final class CallManager {
 
 extension CallStateMachine {
     /// Used only when the server reports an end state the local machine can't reach
-    /// through a normal transition (e.g. a call blocked mid-setup).
+    /// through a normal transition.
     static func forcedTerminal(direction: CallDirection, phase: CallPhase) -> CallStateMachine {
         var machine = CallStateMachine(direction: direction)
         if direction == .outgoing { machine.transition(to: .ringing) }

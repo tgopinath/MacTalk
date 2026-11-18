@@ -1,7 +1,6 @@
 import AppKit
 import MacTalkCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Welcome → email → 6-digit code → profile (name, avatar, availability).
 struct OnboardingView: View {
@@ -13,11 +12,10 @@ struct OnboardingView: View {
             VisualEffectBackground(material: .windowBackground).ignoresSafeArea()
             Group {
                 switch model.auth?.state {
-                case .awaitingCode(let email): CodeStep(email: email)
                 case .needsProfile(let profile): ProfileStep(profile: profile)
                 case .signedIn: DoneStep()
                 case .loading: ProgressView()
-                default: started ? AnyView(EmailStep()) : AnyView(WelcomeStep { started = true })
+                default: started ? AnyView(SignInStep()) : AnyView(WelcomeStep { started = true })
                 }
             }
             .padding(.horizontal, 40)
@@ -35,7 +33,7 @@ private struct WelcomeStep: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            AppMark(size: 84)
+            AppMark(size: 96)
             VStack(spacing: 6) {
                 Text("Welcome to MacTalk").font(.largeTitle.weight(.bold))
                 Text("A walkie-talkie for your Mac. Call friends from the menu bar with one click.")
@@ -67,117 +65,44 @@ private struct Feature: View {
     }
 }
 
-struct EmailStep: View {
+struct SignInStep: View {
     @Environment(AppModel.self) private var model
-    @State private var email = ""
-    @State private var busy = false
+    @State private var waiting = false
     @State private var error: String?
-    @State private var googleBusy = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Spacer()
             Image(systemName: "person.crop.circle.badge.checkmark").font(.system(size: 40)).foregroundStyle(Color.accentColor)
             Text("Sign in to MacTalk").font(.title.weight(.bold))
-            Text("New here? Signing in creates your account.")
+            Text("Use your Google account. New here? Signing in creates your MacTalk account.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let notice = model.auth?.notice { Banner(kind: .info, text: notice) }
-            GoogleSignInButton(busy: googleBusy) {
-                googleBusy = true; error = nil
-                Task {
-                    defer { googleBusy = false }
-                    do { try await model.auth?.signInWithGoogle() } catch {
-                        self.error = (error as? MacTalkError)?.errorDescription ?? error.localizedDescription
+            GoogleSignInButton(busy: waiting) { signIn() }
+            if waiting {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "safari").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Finish signing in with Google in your browser. MacTalk opens again when you're done.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button("Cancel") { model.auth?.cancelSignIn() }.buttonStyle(.link).font(.callout)
                     }
                 }
             }
-            HStack {
-                VStack { Divider() }
-                Text("or use email").font(.caption).foregroundStyle(.secondary)
-                VStack { Divider() }
-            }
-            TextField("you@example.com", text: $email)
-                .textFieldStyle(.roundedBorder).controlSize(.large)
-                .textContentType(.emailAddress).focused($focused)
-                .onSubmit(send)
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
             Spacer()
-            Button(action: send) {
-                if busy { ProgressView().controlSize(.small).tint(.white) } else { Text("Email Me a Code") }
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(!EmailValidator.isValid(email) || busy)
-            .keyboardShortcut(.defaultAction)
+            Text("Friends add you with the email of this Google account. MacTalk only sees your name, email and profile photo.")
+                .font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
         }
-        .onAppear { focused = true }
     }
 
-    private func send() {
-        guard EmailValidator.isValid(email), !busy else { error = MacTalkError.invalidEmail.errorDescription; return }
-        busy = true; error = nil
+    private func signIn() {
+        waiting = true; error = nil
         Task {
-            defer { busy = false }
-            do { try await model.auth?.sendCode(to: email) } catch {
+            defer { waiting = false }
+            do { try await model.auth?.signInWithGoogle() } catch MacTalkError.signInCancelled {
+            } catch {
                 self.error = (error as? MacTalkError)?.errorDescription ?? error.localizedDescription
-            }
-        }
-    }
-}
-
-private struct CodeStep: View {
-    @Environment(AppModel.self) private var model
-    let email: String
-    @State private var code = ""
-    @State private var busy = false
-    @State private var error: String?
-    @State private var resent = false
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Spacer()
-            Image(systemName: "number.square").font(.system(size: 40)).foregroundStyle(Color.accentColor)
-            Text("Check your email").font(.title.weight(.bold))
-            (Text("Enter the code we sent to ") + Text(email).bold() + Text("."))
-                .foregroundStyle(.secondary)
-            TextField("123456", text: $code)
-                .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
-                .onChange(of: code) { _, new in
-                    code = String(new.filter(\.isNumber).prefix(8))
-                    if code.count == 6 { verify() }
-                }
-                .onSubmit(verify)
-            if let error { Text(error).font(.callout).foregroundStyle(.red) }
-            HStack {
-                Button("Use a different email") { model.auth?.useDifferentEmail() }.buttonStyle(.link)
-                Spacer()
-                Button(resent ? "Code sent" : "Resend code") {
-                    Task { try? await model.auth?.sendCode(to: email); resent = true }
-                }
-                .buttonStyle(.link).disabled(resent)
-            }
-            .font(.callout)
-            Spacer()
-            Button(action: verify) {
-                if busy { ProgressView().controlSize(.small).tint(.white) } else { Text("Verify") }
-            }
-            .buttonStyle(PrimaryButtonStyle()).disabled(code.count < 6 || busy).keyboardShortcut(.defaultAction)
-        }
-        .onAppear { focused = true }
-    }
-
-    private func verify() {
-        guard code.count >= 6, !busy else { return }
-        busy = true; error = nil
-        Task {
-            defer { busy = false }
-            do { try await model.auth?.verify(code: code) } catch {
-                self.error = (error as? MacTalkError)?.errorDescription ?? error.localizedDescription
-                code = ""
             }
         }
     }
@@ -203,7 +128,7 @@ struct ProfileStep: View {
                     TextField("Your name", text: $name).textFieldStyle(.roundedBorder).controlSize(.large)
                 }
             }
-            AvatarPicker(choice: $avatar)
+            AvatarPicker(choice: $avatar, googlePhoto: model.auth?.googlePhotoURL)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Availability").font(.caption).foregroundStyle(.secondary)
                 Picker("Availability", selection: $status) {
@@ -220,7 +145,9 @@ struct ProfileStep: View {
         }
         .onAppear {
             name = profile.displayName ?? ""
-            if let url = profile.avatarURL { avatar = AvatarPreset(encoded: url).map(AvatarChoice.preset) ?? .existing(url) }
+            if let url = profile.avatarURL ?? model.auth?.googlePhotoURL {
+                avatar = AvatarPreset(encoded: url).map(AvatarChoice.preset) ?? .existing(url)
+            }
             status = profile.manualStatus
         }
     }
@@ -244,31 +171,25 @@ struct AvatarPreview: View {
         switch choice {
         case .preset(let p): PresetAvatar(preset: p, size: size)
         case .existing(let url): AvatarView(name: name, avatarURL: url, size: size)
-        case .image(let data):
-            if let image = NSImage(data: data) {
-                Image(nsImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
-            }
         }
     }
 }
 
 struct AvatarPicker: View {
     @Binding var choice: AvatarChoice
-    @State private var uploadError: String?
+    var googlePhoto: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Avatar").font(.caption).foregroundStyle(.secondary)
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(36), spacing: 8), count: 7), alignment: .leading, spacing: 8) {
-                Button(action: pickPhoto) {
-                    ZStack {
-                        Circle().fill(Color.primary.opacity(0.07))
-                        Image(systemName: "photo.badge.plus").foregroundStyle(.secondary)
+                if let googlePhoto {
+                    Button { choice = .existing(googlePhoto) } label: {
+                        AvatarView(name: "Google photo", avatarURL: googlePhoto, size: 36)
+                            .overlay(Circle().strokeBorder(choice == .existing(googlePhoto) ? Color.accentColor : .clear, lineWidth: 2.5).padding(-3))
                     }
-                    .frame(width: 36, height: 36)
-                    .overlay(Circle().strokeBorder(isImage ? Color.accentColor : .clear, lineWidth: 2))
+                    .buttonStyle(.plain).help("Your Google photo")
                 }
-                .buttonStyle(.plain).help("Upload a photo")
                 ForEach(AvatarPreset.all) { preset in
                     Button { choice = .preset(preset) } label: {
                         PresetAvatar(preset: preset, size: 36)
@@ -277,20 +198,7 @@ struct AvatarPicker: View {
                     .buttonStyle(.plain)
                 }
             }
-            if let uploadError { Text(uploadError).font(.caption).foregroundStyle(.red) }
         }
-    }
-
-    private var isImage: Bool { if case .image = choice { true } else { false } }
-
-    private func pickPhoto() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a photo for your MacTalk avatar"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        if let data = ImageProcessing.avatarJPEG(from: url) { choice = .image(data); uploadError = nil }
-        else { uploadError = "That image couldn't be read. Try a JPEG or PNG." }
     }
 }
 

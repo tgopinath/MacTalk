@@ -1,17 +1,18 @@
 import AppKit
 import Foundation
 import MacTalkCore
-import Supabase
 
 /// Keeps the user's presence fresh with a 25 s heartbeat, goes offline on sleep / quit,
-/// and recovers the Realtime connection after wake or network changes.
+/// and recovers the live streams after wake or network changes.
 ///
-/// The heartbeat also returns any call that is ringing for this user, which is the
-/// polling fallback in case a Realtime event was lost.
+/// Each heartbeat also re-reads friends' presence and any pending call rings, which is
+/// the fallback if a live-stream event was lost.
 @MainActor
 final class PresenceService {
-    var onRingingCall: ((CallRecord) -> Void)?
-    var onRecovered: (() -> Void)?
+    var onRings: (([CallID: RingEntry]) -> Void)?
+    var onBeat: (() async -> Void)?
+    /// The call this user is in, refreshed on every beat so friends see "In a call".
+    var activeCallID: (() -> CallID?)?
 
     private let backend: Backend
     private let hub: RealtimeHub
@@ -53,28 +54,39 @@ final class PresenceService {
     func beatNow() { Task { await beat() } }
 
     private func beat() async {
-        do {
-            let response = try await backend.client.rpc("heartbeat").execute()
-            if let record = try? Backend.decoder.decode(CallRecord.self, from: response.data) {
-                onRingingCall?(record)
-            }
-        } catch {
-            // Network errors are expected while offline; NetworkMonitor triggers recovery.
+        guard let uid = backend.currentUserID else { return }
+        var values: [String: Any] = ["users/\(uid)/online": true, "users/\(uid)/lastSeen": RealtimeDatabase.serverTimestamp]
+        if let callID = activeCallID?() {
+            values["users/\(uid)/inCall"] = ["callId": callID, "at": RealtimeDatabase.serverTimestamp]
+        } else {
+            values["users/\(uid)/inCall"] = NSNull()
         }
+        do {
+            try await backend.db.update(values)
+            if let rings = try? await backend.db.getJSON("u/\(uid)/rings") { onRings?(RealtimeHub.rings(from: rings)) }
+        } catch {
+            // Expected while offline; NetworkMonitor triggers recovery.
+        }
+        await onBeat?()
     }
 
     func setStatus(_ status: ManualStatus) async throws {
-        try await backend.rpcVoid("set_manual_status", ["p_status": .string(status.rawValue)])
+        guard let uid = backend.currentUserID else { return }
+        do {
+            try await backend.db.update(["users/\(uid)/status": status.rawValue, "users/\(uid)/online": true,
+                                         "users/\(uid)/lastSeen": RealtimeDatabase.serverTimestamp])
+        } catch { throw Backend.map(error) }
     }
 
     /// Best effort, bounded so sleep / quit is never delayed by a slow network.
     func goOffline(timeout: Duration = .seconds(2)) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { [backend] in try? await backend.rpcVoid("go_offline") }
-            group.addTask { try? await Task.sleep(for: timeout) }
-            await group.next()
-            group.cancelAll()
+        guard let uid = backend.currentUserID else { return }
+        let write = Task { @MainActor [backend] in
+            try? await backend.db.update(["users/\(uid)/online": false, "users/\(uid)/inCall": NSNull()])
         }
+        let deadline = Task { try? await Task.sleep(for: timeout); write.cancel() }
+        await write.value
+        deadline.cancel()
     }
 
     private func handleSleep() {
@@ -91,10 +103,9 @@ final class PresenceService {
 
     /// Reconnect after wake or when the network comes back.
     func recover() {
-        guard backend.currentUserID != nil else { return }
+        guard backend.currentUserID != nil, hub.userID != nil else { return }
         hub.restart()
         stop()
         start()
-        onRecovered?()
     }
 }

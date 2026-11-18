@@ -9,18 +9,18 @@ import SwiftUI
 enum PreviewRenderer {
     static func renderAll(to dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let config = AppConfiguration(environment: .development, supabaseURL: URL(string: "https://preview.supabase.co"),
-                                      supabaseAnonKey: String(repeating: "p", count: 40))
-        let me = UserProfile(id: UUID(), email: "gopi@example.com", displayName: "Gopinath", avatarURL: "preset:bird.fill:29",
-                             presenceStatus: .online, manualStatus: .online, profileCompleted: true, lastSeen: Date())
+        let config = AppConfiguration(environment: .development, firebaseAPIKey: String(repeating: "p", count: 40),
+                                      databaseURL: URL(string: "https://preview.invalid"), authPageURL: URL(string: "https://preview.invalid/auth/"))
+        let me = UserProfile(id: "me", email: "gopi@example.com", displayName: "Gopinath", avatarURL: "preset:bird.fill:29",
+                             manualStatus: .online, profileCompleted: true)
         let friends = [
-            Friend(id: UUID(), email: "alex@example.com", displayName: "Alex Johnson", avatarURL: "preset:hare.fill:209", presenceStatus: .online, lastSeen: Date()),
-            Friend(id: UUID(), email: "mia@example.com", displayName: "Mia Chen", presenceStatus: .inCall, lastSeen: Date()),
-            Friend(id: UUID(), email: "sam@example.com", displayName: "Sam Rivera", avatarURL: "preset:leaf.fill:108", presenceStatus: .busy, lastSeen: Date()),
-            Friend(id: UUID(), email: "priya@example.com", displayName: "Priya Nair", presenceStatus: .online, lastSeen: Date()),
-            Friend(id: UUID(), email: "leo@example.com", displayName: "Leo Park", avatarURL: "preset:moon.stars.fill:241", presenceStatus: .offline, lastSeen: Date().addingTimeInterval(-3600)),
+            Friend(id: UUID().uuidString, email: "alex@example.com", displayName: "Alex Johnson", avatarURL: "preset:hare.fill:209", presenceStatus: .online, lastSeen: Date()),
+            Friend(id: UUID().uuidString, email: "mia@example.com", displayName: "Mia Chen", presenceStatus: .inCall, lastSeen: Date()),
+            Friend(id: UUID().uuidString, email: "sam@example.com", displayName: "Sam Rivera", avatarURL: "preset:leaf.fill:108", presenceStatus: .busy, lastSeen: Date()),
+            Friend(id: UUID().uuidString, email: "priya@example.com", displayName: "Priya Nair", presenceStatus: .online, lastSeen: Date()),
+            Friend(id: UUID().uuidString, email: "leo@example.com", displayName: "Leo Park", avatarURL: "preset:moon.stars.fill:241", presenceStatus: .offline, lastSeen: Date().addingTimeInterval(-3600)),
         ]
-        let request = FriendRequest(id: UUID(), direction: .incoming, status: .pending, otherID: UUID(),
+        let request = FriendRequest(direction: .incoming, status: .pending, otherID: "nora",
                                     otherEmail: "nora@example.com", otherDisplayName: "Nora Ito")
 
         for (suffix, appearance) in [("light", NSAppearance(named: .aqua)!), ("dark", NSAppearance(named: .darkAqua)!)] {
@@ -32,7 +32,7 @@ enum PreviewRenderer {
             render(PopoverView().environment(model), size: CGSize(width: 330, height: 520), appearance: appearance,
                    to: dir.appendingPathComponent("popover-\(suffix).png"), material: true)
 
-            var incoming = CallManager.Session(callID: UUID(), direction: .incoming, peer: CallPeer(friend: friends[0]),
+            var incoming = CallManager.Session(callID: UUID().uuidString, direction: .incoming, peer: CallPeer(friend: friends[0]),
                                                machine: CallStateMachine(direction: .incoming))
             model.calls?.debugSet(incoming)
             render(IncomingCallView().environment(model), size: CGSize(width: 360, height: 104), appearance: appearance,
@@ -40,7 +40,7 @@ enum PreviewRenderer {
 
             var machine = CallStateMachine(direction: .outgoing)
             machine.transition(to: .ringing); machine.apply(serverStatus: .accepted); machine.transition(to: .connected)
-            incoming = CallManager.Session(callID: UUID(), direction: .outgoing, peer: CallPeer(friend: friends[0]), machine: machine,
+            incoming = CallManager.Session(callID: UUID().uuidString, direction: .outgoing, peer: CallPeer(friend: friends[0]), machine: machine,
                                            connectedAt: Date().addingTimeInterval(-272), isMuted: false, quality: .good)
             model.calls?.debugSet(incoming)
             render(ActiveCallView().environment(model), size: CGSize(width: 300, height: 380), appearance: appearance,
@@ -58,7 +58,7 @@ enum PreviewRenderer {
         render(OnboardingView().environment(model), size: CGSize(width: 440, height: 560), appearance: NSAppearance(named: .aqua)!,
                to: dir.appendingPathComponent("welcome.png"))
         for (suffix, appearance) in [("light", NSAppearance(named: .aqua)!), ("dark", NSAppearance(named: .darkAqua)!)] {
-            render(EmailStep().environment(model).padding(.horizontal, 40).padding(.vertical, 28).frame(height: 560),
+            render(SignInStep().environment(model).padding(.horizontal, 40).padding(.vertical, 28).frame(height: 560),
                    size: CGSize(width: 440, height: 560), appearance: appearance,
                    to: dir.appendingPathComponent("sign-in-\(suffix).png"), material: true)
         }
@@ -73,7 +73,7 @@ enum PreviewRenderer {
                appearance: NSAppearance(named: .aqua)!, to: dir.appendingPathComponent("manage-friends.png"))
         render(SettingsView(initialTab: .shortcuts).environment(model), size: CGSize(width: 560, height: 480),
                appearance: NSAppearance(named: .aqua)!, to: dir.appendingPathComponent("settings-speed-dial.png"))
-        render(PopoverView().environment(AppModel(configuration: AppConfiguration(environment: .development, supabaseURL: nil, supabaseAnonKey: nil))),
+        render(PopoverView().environment(AppModel(configuration: AppConfiguration(environment: .development, firebaseAPIKey: nil, databaseURL: nil, authPageURL: nil))),
                size: CGSize(width: 330, height: 260), appearance: NSAppearance(named: .aqua)!,
                to: dir.appendingPathComponent("config-needed.png"), material: true)
 

@@ -2,17 +2,16 @@ import XCTest
 @testable import MacTalkCore
 
 final class SignalingAndErrorTests: XCTestCase {
-    private func row(_ id: Int, _ kind: SignalKind = .ice) -> SignalRow {
-        SignalRow(id: id, callID: UUID(), senderID: UUID(), recipientID: UUID(), kind: kind,
-                  payload: .ice(candidate: "candidate:\(id)", sdpMid: "0", sdpMLineIndex: 0))
+    private func row(_ key: String, _ kind: SignalKind = .ice) -> SignalRow {
+        SignalRow(key: key, from: "peer", kind: kind, payload: .ice(candidate: "candidate:\(key)", sdpMid: "0", sdpMLineIndex: 0))
     }
 
     func testInboxDeduplicatesRealtimeAndCatchUp() {
         var inbox = SignalInbox()
-        XCTAssertTrue(inbox.accept(row(1)))
-        XCTAssertTrue(inbox.accept(row(2)))
-        XCTAssertFalse(inbox.accept(row(1)), "row already delivered by realtime")
-        XCTAssertEqual(inbox.lastProcessedID, 2)
+        XCTAssertTrue(inbox.accept(row("-Na1")))
+        XCTAssertTrue(inbox.accept(row("-Na2")))
+        XCTAssertFalse(inbox.accept(row("-Na1")), "row already delivered by the live stream")
+        XCTAssertEqual(inbox.lastProcessedKey, "-Na2")
     }
 
     func testCandidatesBufferUntilRemoteDescription() {
@@ -23,12 +22,12 @@ final class SignalingAndErrorTests: XCTestCase {
         XCTAssertTrue(inbox.drainCandidates().isEmpty)
     }
 
-    func testSignalRowEncodingOmitsServerGeneratedID() throws {
-        let r = SignalRow(callID: UUID(), senderID: UUID(), recipientID: UUID(), kind: .offer, payload: .description("v=0"))
+    func testSignalRowEncodingOmitsPushKey() throws {
+        let r = SignalRow(key: "-Nabc", from: "uidA", kind: .offer, payload: .description("v=0"))
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(r)) as! [String: Any]
-        XCTAssertNil(json["id"], "identity column must not be sent")
+        XCTAssertNil(json["key"], "the push key is the node name, not a field")
         XCTAssertEqual(json["kind"] as? String, "offer")
-        XCTAssertNotNil(json["call_id"])
+        XCTAssertEqual(json["from"] as? String, "uidA")
         XCTAssertEqual((json["payload"] as? [String: Any])?["sdp"] as? String, "v=0")
     }
 
@@ -49,8 +48,8 @@ final class SignalingAndErrorTests: XCTestCase {
         XCTAssertEqual(MacTalkError.fromServer(message: "email_not_verified"), .emailNotVerified)
         XCTAssertEqual(MacTalkError.fromServer(message: "JWT expired"), .sessionExpired)
         XCTAssertEqual(MacTalkError.fromServer(message: "call_expired"), .callExpired)
-        let id = UUID()
-        XCTAssertEqual(MacTalkError.fromServer(message: "crossed_call", detail: id.uuidString), .crossedCall(id))
+        XCTAssertEqual(MacTalkError.fromServer(message: "Permission denied"), .permissionDenied)
+        XCTAssertEqual(MacTalkError.fromServer(message: "TOKEN_EXPIRED"), .sessionExpired)
         XCTAssertEqual(MacTalkError.fromServer(message: "something else"), .server("something else"))
         XCTAssertEqual(MacTalkError.friendOffline("Alex").errorDescription, "Alex is offline right now.")
     }

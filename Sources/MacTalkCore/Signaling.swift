@@ -2,25 +2,17 @@ import Foundation
 
 public enum SignalKind: String, Codable, Sendable { case offer, answer, ice, restart, bye }
 
-/// Row of `public.call_signals`.
+/// `mactalk/calls/{callId}/signals/{pushKey}`. Push keys sort chronologically.
 public struct SignalRow: Codable, Sendable, Equatable {
-    public var id: Int?
-    public var callID: UUID
-    public var senderID: UUID
-    public var recipientID: UUID
+    public var key: String?
+    public var from: UserID
     public var kind: SignalKind
     public var payload: SignalPayload
 
-    enum CodingKeys: String, CodingKey {
-        case id, kind, payload
-        case callID = "call_id"
-        case senderID = "sender_id"
-        case recipientID = "recipient_id"
-    }
+    enum CodingKeys: String, CodingKey { case from, kind, payload }
 
-    public init(id: Int? = nil, callID: UUID, senderID: UUID, recipientID: UUID, kind: SignalKind, payload: SignalPayload) {
-        self.id = id; self.callID = callID; self.senderID = senderID; self.recipientID = recipientID
-        self.kind = kind; self.payload = payload
+    public init(key: String? = nil, from: UserID, kind: SignalKind, payload: SignalPayload) {
+        self.key = key; self.from = from; self.kind = kind; self.payload = payload
     }
 }
 
@@ -41,19 +33,19 @@ public struct SignalPayload: Codable, Sendable, Equatable {
 }
 
 /// Holds remote ICE candidates that arrive before the remote description is set, and
-/// de-duplicates signal rows delivered by both Realtime and the catch-up fetch.
+/// de-duplicates signal rows delivered by both the live stream and the catch-up fetch.
 public struct SignalInbox: Sendable {
-    public private(set) var lastProcessedID: Int = 0
+    public private(set) var lastProcessedKey: String = ""
     public private(set) var pendingCandidates: [SignalPayload] = []
-    private var seen: Set<Int> = []
+    private var seen: Set<String> = []
 
     public init() {}
 
     /// Returns false if this row was already handled.
     public mutating func accept(_ row: SignalRow) -> Bool {
-        guard let id = row.id else { return true }
-        guard seen.insert(id).inserted else { return false }
-        lastProcessedID = max(lastProcessedID, id)
+        guard let key = row.key else { return true }
+        guard seen.insert(key).inserted else { return false }
+        lastProcessedKey = max(lastProcessedKey, key)
         return true
     }
 

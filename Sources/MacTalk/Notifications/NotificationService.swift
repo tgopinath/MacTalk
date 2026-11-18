@@ -9,7 +9,7 @@ import Observation
 /// so calls still ring if notifications are denied.
 @MainActor @Observable
 final class NotificationService: NSObject {
-    enum Action { case accept(UUID), decline(UUID), callBack(UUID), acceptFriend(UUID), openApp }
+    enum Action { case accept(String), decline(String), callBack(String), acceptFriend(String), openApp }
 
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     var onAction: ((Action) -> Void)?
@@ -47,20 +47,20 @@ final class NotificationService: NSObject {
 
     var isDenied: Bool { authorization == .denied }
 
-    func showIncomingCall(callID: UUID, callerName: String, preview: NotificationPreview, avatar: NSImage?) {
+    func showIncomingCall(callID: String, callerName: String, preview: NotificationPreview, avatar: NSImage?) {
         let content = UNMutableNotificationContent()
         content.title = preview == .hidden ? "Incoming call" : callerName
         content.body = preview == .hidden ? "Someone is calling you on MacTalk" : "Incoming voice call"
         content.categoryIdentifier = "INCOMING_CALL"
         content.interruptionLevel = .timeSensitive
-        content.userInfo = ["call_id": callID.uuidString]
+        content.userInfo = ["call_id": callID]
         if preview == .nameAndPhoto, let avatar, let attachment = Self.attachment(avatar, id: callID) {
             content.attachments = [attachment]
         }
         post(id: "call-\(callID)", content: content)
     }
 
-    func clearIncomingCall(_ callID: UUID) {
+    func clearIncomingCall(_ callID: String) {
         center?.removeDeliveredNotifications(withIdentifiers: ["call-\(callID)"])
         center?.removePendingNotificationRequests(withIdentifiers: ["call-\(callID)"])
     }
@@ -70,7 +70,7 @@ final class NotificationService: NSObject {
         content.title = "Missed call"
         content.body = preview == .hidden ? "You missed a MacTalk call" : "\(peer.name) tried to call you"
         content.categoryIdentifier = "MISSED_CALL"
-        content.userInfo = ["peer_id": peer.id.uuidString]
+        content.userInfo = ["peer_id": peer.id]
         post(id: "missed-\(UUID())", content: content)
     }
 
@@ -79,7 +79,7 @@ final class NotificationService: NSObject {
         content.title = "New friend invitation"
         content.body = "\(request.otherName) wants to talk on MacTalk"
         content.categoryIdentifier = "FRIEND_REQUEST"
-        content.userInfo = ["request_id": request.id.uuidString]
+        content.userInfo = ["request_id": request.id]
         post(id: "request-\(request.id)", content: content)
     }
 
@@ -95,7 +95,7 @@ final class NotificationService: NSObject {
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
-    private static func attachment(_ image: NSImage, id: UUID) -> UNNotificationAttachment? {
+    private static func attachment(_ image: NSImage, id: String) -> UNNotificationAttachment? {
         guard let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mactalk-avatar-\(id).png")
         guard (try? png.write(to: url)) != nil else { return nil }
@@ -112,9 +112,9 @@ extension NotificationService: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        let callID = (info["call_id"] as? String).flatMap(UUID.init(uuidString:))
-        let peerID = (info["peer_id"] as? String).flatMap(UUID.init(uuidString:))
-        let requestID = (info["request_id"] as? String).flatMap(UUID.init(uuidString:))
+        let callID = info["call_id"] as? String
+        let peerID = info["peer_id"] as? String
+        let requestID = info["request_id"] as? String
         let actionID = response.actionIdentifier
         completionHandler()
         Task { @MainActor in

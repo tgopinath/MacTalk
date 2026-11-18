@@ -12,7 +12,7 @@ struct ActiveCallView: View {
         let session = model.calls?.session
         VStack(spacing: 0) {
             HStack {
-                AppMark(size: 16)
+                AppMark(size: 20)
                 Text("MacTalk").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 if let q = session?.quality, session?.phase == .connected { QualityBars(quality: q) }
