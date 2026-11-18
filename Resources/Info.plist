@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>MacTalk</string>
+    <key>CFBundleDisplayName</key><string>MacTalk</string>
+    <key>CFBundleIdentifier</key><string>__BUNDLE_ID__</string>
+    <key>CFBundleExecutable</key><string>MacTalk</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+    <key>CFBundleVersion</key><string>__BUILD__</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.social-networking</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MacTalk uses your microphone only during calls you start or accept, so your friends can hear you.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>MacTalk sign-in</string>
+            <key>CFBundleURLSchemes</key><array><string>mactalk</string></array>
+        </dict>
+    </array>
+    <key>NSHumanReadableCopyright</key><string>MacTalk</string>
+    <key>MacTalkEnvironment</key><string>__ENV__</string>
+    <key>MacTalkSupabaseURL</key><string>__SUPABASE_URL__</string>
+    <key>MacTalkSupabaseAnonKey</key><string>__SUPABASE_ANON_KEY__</string>
+</dict>
+</plist>
