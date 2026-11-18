@@ -9,6 +9,11 @@ A native macOS walkie-talkie that lives in the menu bar. Sign in with Google or 
 - **Backend:** Supabase Auth (Google sign-in + email OTP), Postgres with Row Level Security, Realtime, Storage, Edge Functions
 - **NAT traversal:** public STUN, plus TURN from a provider you configure (Cloudflare, coturn, or static credentials)
 
+<p>
+<img src="docs/screens/popover-dark.png" width="260"> <img src="docs/screens/active-call-light.png" width="240"><br>
+<img src="docs/screens/incoming-dark.png" width="360">
+</p>
+
 ---
 
 ## 1. Status: what works and what still needs your setup
