@@ -249,7 +249,7 @@ private struct FriendsSection: View {
                         }
                         .padding(.horizontal, 6)
                     }
-                    .frame(maxHeight: min(CGFloat(filtered.count) * 50 + 8, 360))
+                    .frame(height: min(CGFloat(filtered.count) * 50 + 8, 360)) // explicit height: a ScrollView collapses to 0 in MenuBarExtra
                 }
             }
         }
