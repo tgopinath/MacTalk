@@ -5,6 +5,15 @@
 <link>https://tgopinath.github.io/MacTalk/appcast.xml</link>
 <!-- ITEMS -->
 <item>
+  <title>Version 1.0.2</title>
+  <pubDate>Thu, 19 Nov 2026 05:56:11 GMT</pubDate>
+  <sparkle:version>202611191125</sparkle:version>
+  <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+  <description><![CDATA[<p>Friends who haven&#x27;t finished their profile now show their name or email instead of &quot;Friend&quot;.</p>]]></description>
+  <enclosure url="https://github.com/tgopinath/MacTalk/releases/download/v1.0.2/MacTalk-1.0.2.zip" sparkle:edSignature="RHLcZ4vbqKbh65ZePX+U1M8jLo0Cn5OceMgOkYuvemPelJvYQOcraLm9wfs0HZ1xmuyk7cDZTC1h/nVgtNWJBg==" length="15460316" type="application/octet-stream"/>
+</item>
+<item>
   <title>Version 1.0.1</title>
   <pubDate>Thu, 19 Nov 2026 05:53:33 GMT</pubDate>
   <sparkle:version>202611191121</sparkle:version>
