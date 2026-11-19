@@ -110,10 +110,6 @@ private struct SignedInPopover: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
-            Button { model.windows.showSettings(model: model) } label: {
-                Image(systemName: "gearshape").font(.system(size: 14))
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary).help("Settings")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
