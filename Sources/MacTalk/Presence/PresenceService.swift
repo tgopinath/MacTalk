@@ -10,6 +10,8 @@ import MacTalkCore
 @MainActor
 final class PresenceService {
     var onRings: (([CallID: RingEntry]) -> Void)?
+    /// Fallback copy of `u/{uid}` (friends, invitations sent, blocks) in case the live stream missed an update.
+    var onUserNode: (([String: Any]?) -> Void)?
     var onBeat: (() async -> Void)?
     /// The call this user is in, refreshed on every beat so friends see "In a call".
     var activeCallID: (() -> CallID?)?
@@ -63,7 +65,9 @@ final class PresenceService {
         }
         do {
             try await backend.db.update(values)
-            if let rings = try? await backend.db.getJSON("u/\(uid)/rings") { onRings?(RealtimeHub.rings(from: rings)) }
+            let node = try await backend.db.getJSON("u/\(uid)") as? [String: Any]
+            onUserNode?(node)
+            onRings?(RealtimeHub.rings(from: node?["rings"]))
         } catch {
             // Expected while offline; NetworkMonitor triggers recovery.
         }

@@ -68,6 +68,7 @@ final class AppModel {
         }
         hub.onRings = { [weak calls] rings in calls?.handleRings(rings) }
         presence.onRings = { [weak calls] rings in calls?.handleRings(rings) }
+        presence.onUserNode = { [weak friends] node in friends?.apply(userNode: node) }
         presence.onBeat = { [weak friends] in await friends?.refreshPresence() }
         presence.activeCallID = { [weak calls] in calls?.activeCallID }
         calls.myIdentity = { [weak auth] in (auth?.profile?.name ?? "", auth?.profile?.avatarURL) }

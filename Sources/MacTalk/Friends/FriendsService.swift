@@ -37,6 +37,7 @@ final class FriendsService {
 
     /// `u/{me}` changed: friends, outbox and blocks.
     func apply(userNode: [String: Any]?) {
+        dbLog.info("user node: \((userNode?["friends"] as? [String: Any])?.count ?? 0, privacy: .public) friends"); Diagnostics.log("info: user node: \((userNode?["friends"] as? [String: Any])?.count ?? 0) friends")
         friendSince = [:]
         for (uid, value) in (userNode?["friends"] as? [String: Any]) ?? [:] {
             let since = ((value as? [String: Any])?["since"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
@@ -171,7 +172,15 @@ final class FriendsService {
             values["u/\(me)/friends/\(uid)"] = ["since": ts]
             values["u/\(uid)/friends/\(me)"] = ["since": ts]
         }
-        do { try await backend.db.update(values) } catch { throw Backend.map(error) }
+        do { try await backend.db.update(values) } catch {
+            dbLog.error("respond to invitation failed: \(String(describing: error), privacy: .public)"); Diagnostics.log("error: respond to invitation failed: \(String(describing: error))")
+            throw Backend.map(error)
+        }
+        // Show the result immediately instead of waiting for the live stream.
+        inbox[uid] = nil
+        if accept { friendSince[uid] = Date() }
+        rebuild()
+        if accept { await refreshPresence(only: [uid]) }
     }
 
     func cancel(_ request: FriendRequest) async throws {

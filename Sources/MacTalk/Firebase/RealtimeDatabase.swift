@@ -1,5 +1,8 @@
 import Foundation
 import MacTalkCore
+import OSLog
+
+let dbLog = Logger(subsystem: "app.mactalk", category: "database")
 
 /// Firebase Realtime Database over REST + Server-Sent Events.
 /// Every request carries the user's Firebase ID token; database.rules.json decides access.
@@ -77,6 +80,7 @@ final class RealtimeDatabase {
         }
         guard (200..<300).contains(status) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "HTTP \(status)"
+            dbLog.error("\(method, privacy: .public) \(path, privacy: .public) failed: \(status) \(message, privacy: .public)"); Diagnostics.log("error: \(method) \(path) failed: \(status) \(message)")
             throw MacTalkError.fromServer(message: message)
         }
         return data
@@ -110,6 +114,7 @@ final class RealtimeDatabase {
                         guard status == 200 else { throw MacTalkError.fromServer(message: "HTTP \(status)") }
                         refreshedAfterDenial = false
                         backoff.reset()
+                        dbLog.info("stream \(path, privacy: .public) connected"); Diagnostics.log("info: stream \(path) connected")
                         var event = ""
                         for try await line in bytes.lines {
                             if line.hasPrefix("event:") {
@@ -136,6 +141,7 @@ final class RealtimeDatabase {
                         continue // reconnect with the fresh token
                     } catch {
                         if Task.isCancelled { break }
+                        dbLog.error("stream \(path, privacy: .public) dropped: \(String(describing: error), privacy: .public)"); Diagnostics.log("error: stream \(path) dropped: \(String(describing: error))")
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }

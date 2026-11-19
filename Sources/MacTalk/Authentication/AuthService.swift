@@ -46,6 +46,7 @@ final class AuthService {
     var userID: UserID? { profile?.id }
 
     private func restore() async {
+        Diagnostics.log("launch: signed in = \(backend.auth.session != nil)")
         guard backend.auth.session != nil else { state = .signedOut; return }
         await loadProfile()
     }
