@@ -23,6 +23,11 @@
             <key>CFBundleURLSchemes</key><array><string>mactalk</string></array>
         </dict>
     </array>
+    <key>SUFeedURL</key><string>https://tgopinath.github.io/MacTalk/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>KRWdoGzktkALqiQNEG1kEWU+rJAyyUjbhB4tChl38OQ=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>3600</integer>
     <key>NSHumanReadableCopyright</key><string>MacTalk</string>
     <key>MacTalkEnvironment</key><string>__ENV__</string>
     <key>MacTalkFirebaseAPIKey</key><string>__FIREBASE_API_KEY__</string>

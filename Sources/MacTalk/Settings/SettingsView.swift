@@ -61,6 +61,23 @@ private struct GeneralSettings: View {
                 }
             }
             Section {
+                LabeledContent("Version", value: model.updater.currentVersion)
+                Toggle("Install updates automatically", isOn: Binding(get: { model.updater.automaticallyInstalls },
+                                                                       set: { model.updater.automaticallyInstalls = $0 }))
+                    .disabled(!model.updater.isAvailable)
+                HStack {
+                    if let pending = model.updater.pendingVersion {
+                        Text("Version \(pending) is ready. It installs as soon as you're not in a call.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Check for Updates…") { model.updater.checkForUpdates() }
+                        .disabled(!model.updater.canCheck)
+                }
+            } header: { Text("Updates") } footer: {
+                Text("MacTalk checks every hour and updates itself in the background. It never restarts during a call.")
+            }
+            Section {
                 LabeledContent("Closing windows", value: "MacTalk keeps running in the menu bar")
                 LabeledContent("Quit", value: "Ends calls, goes offline, stops receiving calls")
             } header: { Text("Background") } footer: {

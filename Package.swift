@@ -10,6 +10,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/stasel/WebRTC", from: "137.0.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
     ],
     targets: [
         .target(name: "MacTalkCore", path: "Sources/MacTalkCore"),
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 "MacTalkCore",
                 .product(name: "WebRTC", package: "WebRTC"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/MacTalk",
             linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("CoreAudio")]

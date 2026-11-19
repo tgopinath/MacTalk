@@ -5,3 +5,4 @@ Config/development.env
 Config/staging.env
 Config/production.env
 *.xcuserstate
+.tools/

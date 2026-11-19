@@ -11,6 +11,7 @@ final class AppModel {
     let network = NetworkMonitor()
     let notifications = NotificationService()
     let windows = WindowManager()
+    let updater = AppUpdater()
 
     let backend: Backend?
     let auth: AuthService?
@@ -74,6 +75,7 @@ final class AppModel {
         calls.myIdentity = { [weak auth] in (auth?.profile?.name ?? "", auth?.profile?.avatarURL) }
 
         calls.onChange = { [weak self] in self?.callChanged() }
+        updater.isBusy = { [weak calls] in calls?.activeCallID != nil }
 
         hotkeys.onSlot = { [weak self] slot in self?.speedDial(slot: slot) }
     }

@@ -33,6 +33,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Framewor
 cp "$BIN_DIR/MacTalk" "$APP/Contents/MacOS/MacTalk"
 WEBRTC="$(find .build/artifacts -path '*macos*' -name WebRTC.framework -type d | head -1)"
 ditto "$WEBRTC" "$APP/Contents/Frameworks/WebRTC.framework"
+SPARKLE="$(find .build/artifacts -path '*macos*' -name Sparkle.framework -type d | head -1)"
+ditto "$SPARKLE" "$APP/Contents/Frameworks/Sparkle.framework"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/MacTalk" 2>/dev/null || true
 
 sed -e "s|__BUNDLE_ID__|$BUNDLE_ID|" -e "s|__VERSION__|$VERSION|" -e "s|__BUILD__|$BUILD|" \
@@ -46,8 +48,17 @@ swift scripts/make-icon.swift "$ICONSET" >/dev/null
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "▸ Signing with identity: $SIGN_IDENTITY"
+SPK="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+sign_sparkle() { # nested helpers first, then the framework (Sparkle's documented order)
+  codesign --force "$@" "$SPK/XPCServices/Installer.xpc"
+  codesign --force "$@" --preserve-metadata=entitlements "$SPK/XPCServices/Downloader.xpc"
+  codesign --force "$@" "$SPK/Autoupdate"
+  codesign --force "$@" "$SPK/Updater.app"
+  codesign --force "$@" "$APP/Contents/Frameworks/Sparkle.framework"
+}
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   # Local ad-hoc build: hardened runtime library validation needs a Team ID, so it's off here.
+  sign_sparkle --sign -
   codesign --force --sign - "$APP/Contents/Frameworks/WebRTC.framework"
   codesign --force --entitlements Resources/MacTalk.entitlements --sign - "$APP"
 else
@@ -55,6 +66,7 @@ else
   # Secure timestamp is required for notarization (NOTARIZE=1); skip it otherwise so a slow
   # Apple timestamp server can't break local / Apple Development builds.
   TS="--timestamp=none"; [[ "${NOTARIZE:-0}" == "1" ]] && TS="--timestamp"
+  sign_sparkle --options runtime $TS --sign "$SIGN_IDENTITY"
   codesign --force --options runtime $TS --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/WebRTC.framework"
   codesign --force --options runtime $TS --entitlements Resources/MacTalk.entitlements --sign "$SIGN_IDENTITY" "$APP"
 fi
