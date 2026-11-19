@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<channel>
+<title>MacTalk</title>
+<link>https://tgopinath.github.io/MacTalk/appcast.xml</link>
+<!-- ITEMS -->
+<item>
+  <title>Version 1.0.1</title>
+  <pubDate>Thu, 19 Nov 2026 05:53:33 GMT</pubDate>
+  <sparkle:version>202611191121</sparkle:version>
+  <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+  <description><![CDATA[<p>MacTalk now updates itself automatically. Friends list fix, draggable call cards, new walkie-talkie mark.</p>]]></description>
+  <enclosure url="https://github.com/tgopinath/MacTalk/releases/download/v1.0.1/MacTalk-1.0.1.zip" sparkle:edSignature="XSFOPOMyU3RZqhqPSKWqFd+UN3gGU5yfH/AGy8DqTafxrWC5zXSXHPSocUPsrpgR1Z9/DFQOeHJPf89IBDN/CQ==" length="15457473" type="application/octet-stream"/>
+</item>
+</channel>
+</rss>
