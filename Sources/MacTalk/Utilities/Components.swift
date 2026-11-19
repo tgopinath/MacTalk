@@ -161,3 +161,13 @@ extension Date {
         return f.localizedString(for: self, relativeTo: Date())
     }
 }
+
+/// Lets the user drag a borderless panel by any empty area (buttons still get their clicks).
+struct WindowDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}

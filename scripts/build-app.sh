@@ -52,8 +52,11 @@ if [[ "$SIGN_IDENTITY" == "-" ]]; then
   codesign --force --entitlements Resources/MacTalk.entitlements --sign - "$APP"
 else
   # Developer ID build: hardened runtime + secure timestamp (required for notarization).
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/WebRTC.framework"
-  codesign --force --options runtime --timestamp --entitlements Resources/MacTalk.entitlements --sign "$SIGN_IDENTITY" "$APP"
+  # Secure timestamp is required for notarization (NOTARIZE=1); skip it otherwise so a slow
+  # Apple timestamp server can't break local / Apple Development builds.
+  TS="--timestamp=none"; [[ "${NOTARIZE:-0}" == "1" ]] && TS="--timestamp"
+  codesign --force --options runtime $TS --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/WebRTC.framework"
+  codesign --force --options runtime $TS --entitlements Resources/MacTalk.entitlements --sign "$SIGN_IDENTITY" "$APP"
 fi
 codesign --verify --deep --strict "$APP"
 echo "✓ $APP"

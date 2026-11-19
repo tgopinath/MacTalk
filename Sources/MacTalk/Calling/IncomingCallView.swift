@@ -51,6 +51,7 @@ struct IncomingCallView: View {
         }
         .padding(.horizontal, 14)
         .frame(width: 360, height: 104)
+        .background(WindowDragArea())
         .background(VisualEffectBackground(material: .hudWindow))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))

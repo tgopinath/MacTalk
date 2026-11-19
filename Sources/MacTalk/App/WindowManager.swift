@@ -79,6 +79,7 @@ final class WindowManager {
     func showIncomingCall(model: AppModel) {
         guard windows[.incomingCall] == nil else { return }
         let panel = makePanel(size: NSSize(width: 360, height: 104)) { IncomingCallView().environment(model) }
+        panel.isMovableByWindowBackground = true // starts bottom-right; drag it anywhere
         windows[.incomingCall] = panel
         present(panel, slideIn: true)
     }

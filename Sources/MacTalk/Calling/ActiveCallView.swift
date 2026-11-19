@@ -66,6 +66,7 @@ struct ActiveCallView: View {
             }
         }
         .frame(width: 300, height: 380)
+        .background(WindowDragArea())
         .background(VisualEffectBackground(material: .hudWindow))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))

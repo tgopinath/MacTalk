@@ -11,6 +11,6 @@ ln -s /Applications "$STAGE/Applications"
 rm -f dist/MacTalk.dmg
 hdiutil create -volname "MacTalk" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov dist/MacTalk.dmg >/dev/null
 if [[ -n "${SIGN_IDENTITY:-}" && "$SIGN_IDENTITY" != "-" ]]; then
-  codesign --force --timestamp --sign "$SIGN_IDENTITY" dist/MacTalk.dmg
+  codesign --force $([[ "${NOTARIZE:-0}" == "1" ]] && echo --timestamp || echo --timestamp=none) --sign "$SIGN_IDENTITY" dist/MacTalk.dmg
 fi
 echo "✓ dist/MacTalk.dmg ($(du -h dist/MacTalk.dmg | cut -f1))"
