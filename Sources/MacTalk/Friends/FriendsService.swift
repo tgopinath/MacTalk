@@ -25,6 +25,8 @@ final class FriendsService {
     private var inbox: [UserID: InboxEntry] = [:]
     private var outbox: [String: OutboxEntry] = [:]
     private var blockedIDs: [UserID: BlockedUser] = [:]
+    /// Name / email seen on an invitation, used until the friend has saved a profile.
+    private var hints: [UserID: (name: String?, email: String)] = [:]
 
     init(backend: Backend) { self.backend = backend }
 
@@ -64,7 +66,10 @@ final class FriendsService {
     func apply(inboxNode: [String: Any]?) {
         inbox = [:]
         for (uid, value) in inboxNode ?? [:] {
-            if let entry: InboxEntry = JSONTree.decode(value) { inbox[uid] = entry }
+            if let entry: InboxEntry = JSONTree.decode(value) {
+                inbox[uid] = entry
+                hints[uid] = (entry.fromName, entry.fromEmail)
+            }
         }
         rebuild()
     }
@@ -88,7 +93,10 @@ final class FriendsService {
     private func rebuild() {
         let now = Date()
         friends = friendSince.keys.filter { blockedIDs[$0] == nil }.map { id in
-            Friend(id: id, record: records[id] ?? UserRecord(), since: friendSince[id], now: now)
+            var record = records[id] ?? UserRecord()
+            if record.name == nil { record.name = hints[id]?.name }
+            if record.email == nil { record.email = hints[id]?.email }
+            return Friend(id: id, record: record, since: friendSince[id], now: now)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
